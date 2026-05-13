@@ -110,6 +110,7 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
     spectrum_type = metadata["spectrumType"]
     sample_label = metadata.get("sampleLabel") or metadata.get("sample_label")
     chemical_formula = metadata.get("chemicalFormula") or metadata.get("chemical_formula")
+    anode = metadata.get("anode")  # X-ray anode: Cu/Mo/Co/Cr/Fe/Ag, default Cu
     
     # XRD: use citation-enabled parser (lookup COD + MP candidates)
     # Also support .xlsx via bytes-aware wrapper
