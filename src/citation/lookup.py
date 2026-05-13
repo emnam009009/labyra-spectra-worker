@@ -41,6 +41,7 @@ def lookup_xrd_candidates(
     user_peaks: list[dict[str, Any]],
     sample_label: str | None = None,
     chemical_formula: str | None = None,
+    filename: str | None = None,
 ) -> dict[str, Any]:
     """Main entry: find best material candidates for user XRD peaks.
 
