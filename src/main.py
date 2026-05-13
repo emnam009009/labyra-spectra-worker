@@ -111,6 +111,7 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
     sample_label = metadata.get("sampleLabel") or metadata.get("sample_label")
     chemical_formula = metadata.get("chemicalFormula") or metadata.get("chemical_formula")
     anode = metadata.get("anode")  # X-ray anode: Cu/Mo/Co/Cr/Fe/Ag, default Cu
+    monochromator = metadata.get("monochromator")  # none/ni_filter/graphite/ge111/johansson/si220
     
     # XRD: use citation-enabled parser (lookup COD + MP candidates)
     # Also support .xlsx via bytes-aware wrapper
@@ -121,7 +122,7 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
             def parser(raw_bytes_or_text):
                 # If raw is bytes, parse xlsx; else fall through to text
                 raw_bytes = raw_bytes_or_text if isinstance(raw_bytes_or_text, bytes) else raw_bytes_or_text.encode("utf-8")
-                parsed = parse_xrd_bytes(raw_bytes, original_filename, anode=anode)
+                parsed = parse_xrd_bytes(raw_bytes, original_filename, anode=anode, monochromator=monochromator)
                 # Attach citation
                 from src.citation.lookup import lookup_xrd_candidates
                 if parsed.get("peaks"):
@@ -139,6 +140,7 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
                 chemical_formula=chemical_formula,
                 filename=original_filename,
                 anode=anode,
+                monochromator=monochromator,
             )
     else:
         parser = get_parser(spectrum_type)

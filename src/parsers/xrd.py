@@ -31,6 +31,32 @@ ANODE_WAVELENGTHS: dict[str, float] = {
 }
 
 
+# Monochromator type → Kα1 fraction (rest is Kα2)
+# Higher Kα1% = better monochromaticity (Ge111/Johansson are pure Kα1)
+MONOCHROMATOR_PRESETS: dict[str, float] = {
+    "none": 0.67,         # Standard tube, Kα1:Kα2 = 2:1
+    "ni_filter": 0.75,    # Ni filter removes Kβ but not Kα2
+    "graphite": 0.85,     # Common pyrolytic graphite monochromator
+    "ge111": 0.99,        # Ge(111) Johansson — nearly pure Kα1
+    "johansson": 0.99,    # Same as ge111
+    "si220": 0.995,       # High-resolution synchrotron-grade
+}
+
+
+def resolve_effective_wavelength(anode: str | None, monochromator: str | None = None) -> float:
+    """Effective Kα = weighted mean of Kα1 + Kα2 based on monochromator.
+
+    Returns Å. For pure Kα1 use Ge(111) or higher.
+    """
+    if not anode:
+        anode = "Cu"
+    ka1 = ANODE_WAVELENGTHS.get(anode, CU_KA1_ANGSTROM)
+    # Kα2 ≈ Kα1 * 1.0025 (within 0.25% for all anodes typically)
+    ka2 = ka1 * 1.00247  # rough average ratio
+    frac = MONOCHROMATOR_PRESETS.get(monochromator or "none", 0.67)
+    return frac * ka1 + (1.0 - frac) * ka2
+
+
 def resolve_wavelength(anode):
     if not anode:
         return CU_KA1_ANGSTROM
@@ -145,7 +171,7 @@ def _williamson_hall(peaks: list[dict[str, float]], wavelength: float = CU_KA1_A
     }
 
 
-def parse_xrd(raw_text: str, *, wavelength: float = CU_KA1_ANGSTROM, anode: str | None = None) -> dict[str, Any]:
+def parse_xrd(raw_text: str, *, wavelength: float = CU_KA1_ANGSTROM, anode: str | None = None, monochromator: str | None = None) -> dict[str, Any]:
     x, y = _parse_two_column(raw_text)
     peaks = _detect_peaks(x, y)
     return {
@@ -173,11 +199,14 @@ def parse_xrd_with_citation(
     *,
     sample_label: str | None = None,
     chemical_formula: str | None = None,
+    filename: str | None = None,
+    anode: str | None = None,
+    monochromator: str | None = None,
 ) -> dict:
     """Parse XRD + attach citation candidates if formula resolvable."""
     from src.citation.lookup import lookup_xrd_candidates
 
-    parsed = parse_xrd(raw_text)
+    parsed = parse_xrd(raw_text, anode=anode, monochromator=monochromator)
     user_peaks = parsed.get("peaks", [])
     if not user_peaks:
         return parsed
@@ -186,6 +215,7 @@ def parse_xrd_with_citation(
         user_peaks,
         sample_label=sample_label,
         chemical_formula=chemical_formula,
+        filename=filename,
     )
     parsed["citation"] = citation_result
     return parsed
@@ -194,14 +224,14 @@ def parse_xrd_with_citation(
 # ============================================================
 # R160-spectra-4a-hotfix1: Excel support
 # ============================================================
-def parse_xrd_bytes(raw_bytes: bytes, filename: str, anode: str | None = None) -> dict[str, Any]:
+def parse_xrd_bytes(raw_bytes: bytes, filename: str, anode: str | None = None, monochromator: str | None = None) -> dict[str, Any]:
     """Parse XRD from raw bytes. Routes to .xlsx parser if .xlsx, else text."""
     if filename.lower().endswith(".xlsx"):
         result = parse_xlsx_two_column(raw_bytes)
         if result is None:
             raise ValueError("Could not parse XLSX (no valid 2theta+intensity columns)")
         x, y = result
-        wavelength = resolve_wavelength(anode)
+        wavelength = resolve_effective_wavelength(anode, monochromator)
         return _build_xrd_result(x, y, wavelength=wavelength)
     # Decode bytes as text
     try:
