@@ -128,6 +128,7 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
                         parsed["peaks"],
                         sample_label=sample_label,
                         chemical_formula=chemical_formula,
+                        filename=original_filename,
                     )
                 return parsed
         else:
@@ -135,6 +136,7 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
                 raw,
                 sample_label=sample_label,
                 chemical_formula=chemical_formula,
+                filename=original_filename,
             )
     else:
         parser = get_parser(spectrum_type)
