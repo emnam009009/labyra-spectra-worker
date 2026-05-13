@@ -112,19 +112,12 @@ def _williamson_hall(peaks: list[dict[str, float]], wavelength: float = CU_KA1_A
     if intercept <= 0:
         return None
     D_angstrom = (K_SCHERRER * wavelength) / intercept
-    # Gate: R²<0.5 means linear W-H model doesn't fit (likely multi-phase or anisotropic)
-    is_reliable = r_squared >= 0.5
     return {
         "crystallite_size_nm": float(round(D_angstrom / 10.0, 2)),
         "microstrain": float(round(slope, 6)),
         "r_squared": r_squared,
         "method": "Williamson-Hall",
         "n_peaks_used": len(x_vals),
-        "is_reliable": is_reliable,
-        "quality_note": (
-            None if is_reliable
-            else f"Linear W-H fit poor (R²={r_squared:.2f}). Possible multi-phase, anisotropic strain, or instrumental broadening. Use Scherrer or Rietveld."
-        ),
     }
 
 
