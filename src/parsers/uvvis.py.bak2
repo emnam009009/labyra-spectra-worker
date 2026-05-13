@@ -1,13 +1,4 @@
-"""UV-Vis parser with 4 Tauc transition types.
-
-Transitions:
-  - direct_allowed (gamma=1/2, exponent n=2)
-  - direct_forbidden (gamma=3/2, exponent n=2/3)
-  - indirect_allowed (gamma=2, exponent n=1/2)
-  - indirect_forbidden (gamma=3, exponent n=1/3)
-
-Pick best R^2 across all 4. Tauc plot exposes data for any chosen transition.
-"""
+"""UV-Vis parser: wavelength + absorbance → Tauc bandgap + peaks + spectrum curve."""
 
 from __future__ import annotations
 
@@ -22,14 +13,6 @@ from scipy.signal import find_peaks, savgol_filter
 from src.parsers._utils import downsample_curve
 
 logger = logging.getLogger(__name__)
-
-# (label, exponent n in (alpha*hv)^n formula, gamma value)
-TRANSITIONS: list[tuple[str, float, str]] = [
-    ("direct_allowed", 2.0, "1/2"),
-    ("direct_forbidden", 2.0 / 3.0, "3/2"),
-    ("indirect_allowed", 0.5, "2"),
-    ("indirect_forbidden", 1.0 / 3.0, "3"),
-]
 
 
 def _parse_two_column(text: str) -> tuple[np.ndarray, np.ndarray]:
@@ -50,25 +33,25 @@ def _parse_two_column(text: str) -> tuple[np.ndarray, np.ndarray]:
     raise ValueError("Could not parse two-column UV-Vis data")
 
 
-def _tauc_bandgap_for_transition(
-    energy_ev: np.ndarray,
+def _tauc_bandgap(
+    wavelength_nm: np.ndarray,
     absorbance: np.ndarray,
     *,
-    transition: str,
-    n: float,
-    gamma: str,
+    transition: str = "direct",
 ) -> dict[str, Any] | None:
-    """Best-window linear fit on (alpha*hv)^n vs hv."""
+    """Best-window linear fit on (αhν)^n vs hν."""
+    energy_ev = 1240.0 / wavelength_nm
+    n = 2.0 if transition == "direct" else 0.5
     alpha_hv_n = (absorbance * energy_ev) ** n
 
     order = np.argsort(energy_ev)
-    e_sorted = energy_ev[order]
-    a_sorted = alpha_hv_n[order]
+    energy_sorted = energy_ev[order]
+    alpha_sorted = alpha_hv_n[order]
 
-    if len(e_sorted) < 30:
+    if len(energy_sorted) < 30:
         return None
 
-    smoothed = savgol_filter(a_sorted, window_length=11, polyorder=2)
+    smoothed = savgol_filter(alpha_sorted, window_length=11, polyorder=2)
     baseline = float(np.percentile(smoothed[:len(smoothed) // 4], 50))
     peak_val = float(smoothed.max())
     threshold = baseline + 0.1 * (peak_val - baseline)
@@ -78,14 +61,15 @@ def _tauc_bandgap_for_transition(
     onset_idx = int(above[0])
 
     best = None
-    best_score = 0.6
+    best_r2 = 0.6
+
     for start_offset in range(0, min(30, len(smoothed) - onset_idx - 10)):
         i_start = onset_idx + start_offset
         for window_size in (8, 12, 16, 20, 25):
             i_end = i_start + window_size
             if i_end >= len(smoothed) - 2:
                 continue
-            x_fit = e_sorted[i_start:i_end]
+            x_fit = energy_sorted[i_start:i_end]
             y_fit = smoothed[i_start:i_end]
             if len(x_fit) < 6:
                 continue
@@ -102,46 +86,33 @@ def _tauc_bandgap_for_transition(
             if bandgap < 0.5 or bandgap > 6.0:
                 continue
             score = r2 * (1 + window_size / 50.0)
-            if score > best_score:
-                best_score = score
+            if score > best_r2:
+                best_r2 = score
                 best = {
                     "bandgap_ev": float(round(bandgap, 3)),
                     "transition": transition,
-                    "gamma": gamma,
-                    "exponent_n": float(round(n, 4)),
                     "r_squared": float(round(r2, 3)),
                     "fit_range_ev": [float(round(x_fit.min(), 3)), float(round(x_fit.max(), 3))],
                     "slope": float(slope),
                     "intercept": float(intercept),
-                    "method": f"Tauc plot — {transition} (n={round(n, 3)})",
+                    "method": "Tauc plot linear extrapolation (best-window fit)",
                 }
     return best
 
 
-def _tauc_curve(energy_ev: np.ndarray, absorbance: np.ndarray, n: float) -> dict[str, list[float]]:
-    """Compute (alpha*hv)^n vs hv for a specific n."""
+def _tauc_curve(
+    wavelength_nm: np.ndarray,
+    absorbance: np.ndarray,
+    transition: str,
+) -> dict[str, list[float]]:
+    """Compute Tauc curve (αhν)^n vs hν for visualization."""
+    energy_ev = 1240.0 / wavelength_nm
+    n = 2.0 if transition == "direct" else 0.5
     alpha_hv_n = (absorbance * energy_ev) ** n
     order = np.argsort(energy_ev)
-    return downsample_curve(energy_ev[order], alpha_hv_n[order], target_points=400)
-
-
-def _best_tauc(x: np.ndarray, y: np.ndarray) -> tuple[dict[str, Any] | None, str, float]:
-    """Test all 4 transitions, return best fit + the n value used."""
-    energy_ev = 1240.0 / x
-    candidates: list[dict[str, Any]] = []
-    for label, n_val, gamma in TRANSITIONS:
-        result = _tauc_bandgap_for_transition(
-            energy_ev, y, transition=label, n=n_val, gamma=gamma,
-        )
-        if result:
-            candidates.append(result)
-
-    if not candidates:
-        # Return None bandgap but a curve for direct_allowed as default visualization
-        return None, "direct_allowed", 2.0
-
-    best = max(candidates, key=lambda c: c["r_squared"])
-    return best, best["transition"], best["exponent_n"]
+    e_sorted = energy_ev[order]
+    a_sorted = alpha_hv_n[order]
+    return downsample_curve(e_sorted, a_sorted, target_points=400)
 
 
 def _detect_absorption_peaks(
@@ -168,16 +139,31 @@ def _detect_absorption_peaks(
 
 def parse_uvvis(raw_text: str) -> dict[str, Any]:
     x, y = _parse_two_column(raw_text)
-    bandgap_result, best_label, best_n = _best_tauc(x, y)
+    direct = _tauc_bandgap(x, y, transition="direct")
+    indirect = _tauc_bandgap(x, y, transition="indirect")
+
+    bandgap_result = None
+    chosen_transition = "direct"
+    if direct and indirect:
+        if direct["r_squared"] >= indirect["r_squared"]:
+            bandgap_result = direct
+            chosen_transition = "direct"
+        else:
+            bandgap_result = indirect
+            chosen_transition = "indirect"
+    elif direct:
+        bandgap_result = direct
+    elif indirect:
+        bandgap_result = indirect
+        chosen_transition = "indirect"
+
     peaks = _detect_absorption_peaks(x, y)
-    energy_ev = 1240.0 / x
 
     return {
         "spectrum_type": "uvvis",
         "peaks": peaks,
         "spectrum_curve": downsample_curve(x, y, target_points=500),
-        "tauc_curve": _tauc_curve(energy_ev, y, best_n),
-        "all_transition_fits": _all_transition_summary(energy_ev, y),
+        "tauc_curve": _tauc_curve(x, y, chosen_transition),
         "quick_stats": {
             "rowCount": int(len(x)),
             "xRange": [float(round(x.min(), 1)), float(round(x.max(), 1))],
@@ -188,27 +174,3 @@ def parse_uvvis(raw_text: str) -> dict[str, Any]:
         "x_unit": "nm",
         "y_unit": "Absorbance",
     }
-
-
-def _all_transition_summary(energy_ev: np.ndarray, y: np.ndarray) -> list[dict[str, Any]]:
-    """Return summary of all 4 transitions for transparency."""
-    results = []
-    for label, n_val, gamma in TRANSITIONS:
-        res = _tauc_bandgap_for_transition(
-            energy_ev, y, transition=label, n=n_val, gamma=gamma,
-        )
-        if res:
-            results.append({
-                "transition": label,
-                "gamma": gamma,
-                "bandgap_ev": res["bandgap_ev"],
-                "r_squared": res["r_squared"],
-            })
-        else:
-            results.append({
-                "transition": label,
-                "gamma": gamma,
-                "bandgap_ev": None,
-                "r_squared": None,
-            })
-    return results
