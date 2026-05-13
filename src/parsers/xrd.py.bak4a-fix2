@@ -188,8 +188,9 @@ def parse_xrd_bytes(raw_bytes: bytes, filename: str) -> dict[str, Any]:
 
 def _build_xrd_result(x: np.ndarray, y: np.ndarray) -> dict[str, Any]:
     """Build XRD result dict from x,y arrays (shared with parse_xrd)."""
-    peaks = _detect_peaks(x, y)
-    scherrer = _scherrer_crystallite_size(peaks, CU_KA1_ANGSTROM) if peaks else None
+    from src.parsers.xrd import _detect_xrd_peaks, _scherrer_size, _williamson_hall, CU_KA1_ANGSTROM, downsample_curve
+    peaks = _detect_xrd_peaks(x, y)
+    scherrer = _scherrer_size(peaks, CU_KA1_ANGSTROM) if peaks else None
     wh = _williamson_hall(peaks, CU_KA1_ANGSTROM) if peaks else None
     return {
         "spectrum_type": "xrd",
