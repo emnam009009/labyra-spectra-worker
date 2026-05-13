@@ -1,4 +1,4 @@
-"""Worker configuration via Pydantic Settings."""
+"""Worker configuration."""
 
 from __future__ import annotations
 
@@ -10,23 +10,18 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # GCP
     gcp_project_id: str = "labyra-app-dev"
     gcp_region: str = "asia-southeast1"
     firebase_bucket: str = ""
 
-    # Anthropic
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-5-20250929"
     anthropic_max_tokens: int = 4096
 
-    # Locale fallback
     default_locale: str = "en"
 
-    # Analysis version — bump when prompts/parsers change.
-    # R160-spectra-3a: xrd-1.0.0
-    # R160-spectra-3c: 4 types live
-    analysis_version: str = "spectra-3c-1.0.0"
+    # R160-spectra-3c-hotfix: spectrum curves + UV-Vis DRS
+    analysis_version: str = "spectra-3c-hotfix-1.0.1"
 
     delete_raw_after_analyze: bool = False
     max_peaks: int = 30

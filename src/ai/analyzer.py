@@ -1,7 +1,4 @@
-"""Anthropic AI analyzer: parsed data + metadata → AI interpretation JSON.
-
-R160-spectra-3c: dispatch system + user prompts by spectrum_type.
-"""
+"""Anthropic analyzer with type dispatch. @phase R160-spectra-3c-hotfix"""
 
 from __future__ import annotations
 
@@ -18,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 
 def analyze(parsed: dict[str, Any], metadata: dict[str, Any], locale: str) -> dict[str, Any]:
-    """Call Anthropic Claude with hybrid locale + type-specific prompt."""
     settings = get_settings()
     client = Anthropic(api_key=settings.anthropic_api_key)
 
@@ -41,7 +37,6 @@ def analyze(parsed: dict[str, Any], metadata: dict[str, Any], locale: str) -> di
     text_parts = [block.text for block in response.content if block.type == "text"]
     raw = "".join(text_parts).strip()
 
-    # Strip markdown fences if model ignored instruction
     if raw.startswith("```"):
         raw = raw.split("```", 2)[-2] if raw.count("```") >= 2 else raw
         raw = raw.removeprefix("json").strip()
@@ -52,17 +47,14 @@ def analyze(parsed: dict[str, Any], metadata: dict[str, Any], locale: str) -> di
         logger.exception("AI returned invalid JSON. Raw: %s", raw[:500])
         raise ValueError(f"AI returned non-JSON: {exc}") from exc
 
-    # Type-specific schema validation
-    if spectrum_type == "xrd":
-        required = {"summary", "phases", "overall_confidence"}
-    elif spectrum_type == "uvvis":
-        required = {"summary", "bandgap", "overall_confidence"}
-    elif spectrum_type == "raman":
-        required = {"summary", "vibrational_modes", "overall_confidence"}
-    elif spectrum_type == "ftir":
-        required = {"summary", "functional_groups", "overall_confidence"}
-    else:
-        required = {"summary", "overall_confidence"}
+    REQUIRED = {
+        "xrd": {"summary", "phases", "overall_confidence"},
+        "uvvis": {"summary", "bandgap", "overall_confidence"},
+        "uvvis_drs": {"summary", "bandgap", "overall_confidence"},
+        "raman": {"summary", "vibrational_modes", "overall_confidence"},
+        "ftir": {"summary", "functional_groups", "overall_confidence"},
+    }
+    required = REQUIRED.get(spectrum_type, {"summary", "overall_confidence"})
 
     missing = required - set(parsed_json.keys())
     if missing:
