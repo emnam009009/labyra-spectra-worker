@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+*.egg-info/
+*.egg
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Secrets
+.env
+.env.local
+*.json
+!package.json
+!tsconfig.json
+service-account*.json
+credentials*.json
+
+# Cloud Run / Docker
+.dockerignore.bak
+
+# Local data
+data/
+*.xy
+*.csv.bak
+spectra_samples/

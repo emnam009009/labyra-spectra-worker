@@ -1,0 +1,64 @@
+[project]
+name = "labyra-spectra-worker"
+version = "0.1.0"
+description = "Python worker for spectrum parsing + AI analysis"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "Labyra Platform" }]
+license = { text = "Proprietary" }
+
+dependencies = [
+    # Web framework (Cloud Run HTTP)
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+
+    # GCP
+    "google-cloud-firestore>=2.19.0",
+    "google-cloud-storage>=2.18.0",
+    "google-cloud-pubsub>=2.27.0",
+    "google-cloud-secret-manager>=2.21.0",
+    "google-cloud-logging>=3.11.0",
+
+    # AI
+    "anthropic>=0.39.0",
+
+    # Scientific
+    "numpy>=2.0.0",
+    "scipy>=1.14.0",
+    "pandas>=2.2.0",
+
+    # Spectrum parsers (phase-3b will use XRD subset)
+    "pymatgen>=2024.10.3",
+    "lmfit>=1.3.2",
+
+    # Validation
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.7.0",
+    "mypy>=1.13.0",
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "httpx>=0.27.0",  # for FastAPI TestClient
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"]  # line length handled by formatter
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
