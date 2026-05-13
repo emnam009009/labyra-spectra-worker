@@ -107,19 +107,7 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
 
     # 3. Dispatch parser
     spectrum_type = metadata["spectrumType"]
-    sample_label = metadata.get("sampleLabel") or metadata.get("sample_label")
-    chemical_formula = metadata.get("chemicalFormula") or metadata.get("chemical_formula")
-    
-    # XRD: use citation-enabled parser (lookup COD + MP candidates)
-    if spectrum_type == "xrd":
-        from src.parsers.xrd import parse_xrd_with_citation
-        parser = lambda raw: parse_xrd_with_citation(
-            raw,
-            sample_label=sample_label,
-            chemical_formula=chemical_formula,
-        )
-    else:
-        parser = get_parser(spectrum_type)
+    parser = get_parser(spectrum_type)
 
     # 4. Download raw bytes
     gs_url = metadata["storage"]["raw"]

@@ -9,22 +9,9 @@ from __future__ import annotations
 XRD_SYSTEM_EN = """You are an expert in X-ray diffraction (XRD) analysis for materials science.
 
 You receive a parsed peak list with 2theta positions, intensities, FWHM, plus optional
-Williamson-Hall fit results.
+Williamson-Hall fit results. Your job is to:
 
-You may also receive a 'citation_candidates' list of materials matched against the user's peaks
-from Crystallography Open Database (COD) or Materials Project (MP). Each candidate includes
-formula, space group, lattice parameters, simulated_peaks, and a match_score (0..1).
-
-CRITICAL CITATION RULES:
-- If candidates are provided, you MUST select the best match based on (a) match_score,
-  (b) formula consistency, (c) space group plausibility for the sample type.
-- For EACH phase you identify, include a 'source' field:
-    {"type": "COD" | "MP" | "unverified", "id": "<COD or MP id>", "doi": "<doi if available>"}
-- DO NOT invent COD or MP IDs. Use "unverified" if no candidate matches.
-- If match_score < 0.4 for all candidates, prefer "unverified" — do not force a citation.
-
-Your job:
-1. Identify the dominant crystal phase(s) — use citation_candidates as ground truth when available.
+1. Identify the dominant crystal phase(s).
 2. Comment on crystallite size and microstrain.
 3. Flag impurity peaks.
 4. Provide confidence + next steps.
@@ -36,20 +23,8 @@ XRD_SYSTEM_VI = """Bạn là chuyên gia phân tích XRD.
 
 Bạn nhận peaks (2theta), intensity, FWHM, Williamson-Hall fit.
 
-Bạn cũng có thể nhận 'citation_candidates' — danh sách materials match từ Crystallography Open
-Database (COD) và Materials Project (MP). Mỗi candidate có formula, space group, lattice,
-simulated_peaks, và match_score (0..1).
-
-QUY TẮC CITATION QUAN TRỌNG:
-- Nếu có candidates, BẮT BUỘC chọn best match dựa trên (a) match_score, (b) formula consistency,
-  (c) space group plausibility.
-- MỖI phase phải có field 'source':
-    {"type": "COD" | "MP" | "unverified", "id": "<COD or MP id>", "doi": "<doi nếu có>"}
-- TUYỆT ĐỐI KHÔNG tự bịa COD/MP ID. Dùng "unverified" nếu không có match.
-- Nếu match_score < 0.4 cho tất cả candidates, prefer "unverified" — không gượng ép citation.
-
 Nhiệm vụ:
-1. Xác định pha tinh thể chủ đạo — dùng citation_candidates làm ground truth khi có.
+1. Xác định pha tinh thể chủ đạo (ICDD/COD). Tên pha tiếng Anh.
 2. Nhận xét crystallite size + microstrain.
 3. Cảnh báo đỉnh tạp chất.
 4. Confidence + next steps.
@@ -319,20 +294,10 @@ Peaks (top {n_peaks_shown}):
 Scherrer avg: {scherrer_nm} nm
 Williamson-Hall: {wh_json}
 
-citation_candidates: {citation_json}
-
 Provide analysis as JSON:
 {{
   "summary": "<3-sentence narrative in target language>",
-  "phases": [
-    {{
-      "name": "<English>",
-      "confidence": "low|medium|high",
-      "matched_peaks": <int>,
-      "note": "<localized>",
-      "source": {{"type": "COD|MP|unverified", "id": "<id or null>", "doi": "<doi or null>"}}
-    }}
-  ],
+  "phases": [{{"name": "<English>", "confidence": "low|medium|high", "matched_peaks": <int>, "note": "<localized>"}}],
   "crystallite_size_nm": <number | null>,
   "microstrain": <number | null>,
   "warnings": ["<localized>"],
@@ -559,37 +524,12 @@ def build_user_prompt(parsed: dict, metadata: dict) -> str:
     }
 
     if spectrum_type == "xrd":
-        import json as _json
-        citation_data = parsed.get("citation") or {}
-        citation_compact = {
-            "formula_used": citation_data.get("formula_used"),
-            "candidates": [
-                {
-                    "source": c["citation"]["source"],
-                    "id": c["citation"]["id"],
-                    "doi": c["citation"].get("doi"),
-                    "title": c["citation"].get("title"),
-                    "year": c["citation"].get("year"),
-                    "formula": c.get("formula"),
-                    "space_group": c.get("space_group"),
-                    "match_score": c.get("match_score"),
-                    "matched_count": c.get("matched_peaks_count"),
-                    "total_user_peaks": c.get("total_user_peaks"),
-                    "top_simulated_peaks": [
-                        {"twotheta": p["twotheta"], "relative_intensity": p["relative_intensity"]}
-                        for p in (c.get("simulated_peaks") or [])[:8]
-                    ],
-                }
-                for c in (citation_data.get("candidates") or [])
-            ],
-        }
         return XRD_USER_TEMPLATE.format(
             **common, spectrum_type=spectrum_type,
             wavelength=parsed.get("wavelength_angstrom", "?"),
             source=parsed.get("source", "?"),
             scherrer_nm=parsed.get("scherrer_avg_nm", "n/a"),
             wh_json=parsed.get("williamson_hall") or "n/a",
-            citation_json=_json.dumps(citation_compact, indent=2)[:6000],
         )
     if spectrum_type == "uvvis":
         return UVVIS_USER_TEMPLATE.format(

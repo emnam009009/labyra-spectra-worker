@@ -138,29 +138,3 @@ def parse_xrd(raw_text: str, *, wavelength: float = CU_KA1_ANGSTROM) -> dict[str
         "wavelength_angstrom": wavelength,
         "source": "Cu K-α₁",
     }
-
-
-# ============================================================
-# R160-spectra-4a: Citation lookup hook
-# ============================================================
-def parse_xrd_with_citation(
-    raw_text: str,
-    *,
-    sample_label: str | None = None,
-    chemical_formula: str | None = None,
-) -> dict:
-    """Parse XRD + attach citation candidates if formula resolvable."""
-    from src.citation.lookup import lookup_xrd_candidates
-
-    parsed = parse_xrd(raw_text)
-    user_peaks = parsed.get("peaks", [])
-    if not user_peaks:
-        return parsed
-
-    citation_result = lookup_xrd_candidates(
-        user_peaks,
-        sample_label=sample_label,
-        chemical_formula=chemical_formula,
-    )
-    parsed["citation"] = citation_result
-    return parsed
