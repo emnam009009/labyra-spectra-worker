@@ -20,23 +20,6 @@ logger = logging.getLogger(__name__)
 CU_KA1_ANGSTROM = 1.5406
 K_SCHERRER = 0.94
 
-# X-ray anode Kα1 wavelengths (Angstroms)
-ANODE_WAVELENGTHS: dict[str, float] = {
-    "Cu": 1.5406,
-    "Mo": 0.70932,
-    "Co": 1.78897,
-    "Cr": 2.29100,
-    "Fe": 1.93604,
-    "Ag": 0.55941,
-}
-
-
-def resolve_wavelength(anode):
-    if not anode:
-        return CU_KA1_ANGSTROM
-    return ANODE_WAVELENGTHS.get(anode, CU_KA1_ANGSTROM)
-
-
 
 def _parse_two_column(text: str) -> tuple[np.ndarray, np.ndarray]:
     for sep in [",", r"\s+", "\t"]:
@@ -145,7 +128,7 @@ def _williamson_hall(peaks: list[dict[str, float]], wavelength: float = CU_KA1_A
     }
 
 
-def parse_xrd(raw_text: str, *, wavelength: float = CU_KA1_ANGSTROM, anode: str | None = None) -> dict[str, Any]:
+def parse_xrd(raw_text: str, *, wavelength: float = CU_KA1_ANGSTROM) -> dict[str, Any]:
     x, y = _parse_two_column(raw_text)
     peaks = _detect_peaks(x, y)
     return {
@@ -194,15 +177,14 @@ def parse_xrd_with_citation(
 # ============================================================
 # R160-spectra-4a-hotfix1: Excel support
 # ============================================================
-def parse_xrd_bytes(raw_bytes: bytes, filename: str, anode: str | None = None) -> dict[str, Any]:
+def parse_xrd_bytes(raw_bytes: bytes, filename: str) -> dict[str, Any]:
     """Parse XRD from raw bytes. Routes to .xlsx parser if .xlsx, else text."""
     if filename.lower().endswith(".xlsx"):
         result = parse_xlsx_two_column(raw_bytes)
         if result is None:
             raise ValueError("Could not parse XLSX (no valid 2theta+intensity columns)")
         x, y = result
-        wavelength = resolve_wavelength(anode)
-        return _build_xrd_result(x, y, wavelength=wavelength)
+        return _build_xrd_result(x, y)
     # Decode bytes as text
     try:
         text = raw_bytes.decode("utf-8")
@@ -211,11 +193,11 @@ def parse_xrd_bytes(raw_bytes: bytes, filename: str, anode: str | None = None) -
     return parse_xrd(text)
 
 
-def _build_xrd_result(x: np.ndarray, y: np.ndarray, *, wavelength: float = CU_KA1_ANGSTROM) -> dict[str, Any]:
+def _build_xrd_result(x: np.ndarray, y: np.ndarray) -> dict[str, Any]:
     """Build XRD result dict from x,y arrays (shared with parse_xrd)."""
     peaks = _detect_peaks(x, y)
-    scherrer = _scherrer_crystallite_size(peaks, wavelength) if peaks else None
-    wh = _williamson_hall(peaks, wavelength) if peaks else None
+    scherrer = _scherrer_crystallite_size(peaks, CU_KA1_ANGSTROM) if peaks else None
+    wh = _williamson_hall(peaks, CU_KA1_ANGSTROM) if peaks else None
     return {
         "spectrum_type": "xrd",
         "peaks": peaks,
@@ -228,6 +210,6 @@ def _build_xrd_result(x: np.ndarray, y: np.ndarray, *, wavelength: float = CU_KA
         },
         "scherrer_avg_nm": float(round(scherrer, 2)) if scherrer else None,
         "williamson_hall": wh,
-        "wavelength_angstrom": wavelength,
-        "source": next((k for k, v in ANODE_WAVELENGTHS.items() if abs(v - wavelength) < 0.001), "Cu") + "-Kα1",
+        "wavelength_angstrom": CU_KA1_ANGSTROM,
+        "source": "Cu-Kα1",
     }

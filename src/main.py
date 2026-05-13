@@ -120,7 +120,7 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
             def parser(raw_bytes_or_text):
                 # If raw is bytes, parse xlsx; else fall through to text
                 raw_bytes = raw_bytes_or_text if isinstance(raw_bytes_or_text, bytes) else raw_bytes_or_text.encode("utf-8")
-                parsed = parse_xrd_bytes(raw_bytes, original_filename)
+                parsed = parse_xrd_bytes(raw_bytes, original_filename, anode=anode)
                 # Attach citation
                 from src.citation.lookup import lookup_xrd_candidates
                 if parsed.get("peaks"):
@@ -137,6 +137,7 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
                 sample_label=sample_label,
                 chemical_formula=chemical_formula,
                 filename=original_filename,
+                anode=anode,
             )
     else:
         parser = get_parser(spectrum_type)
