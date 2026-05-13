@@ -94,9 +94,8 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
     # 1. Load metadata
     metadata = get_spectrum(tenant_id, spectrum_id)
     if not metadata:
-        # Spectrum was deleted before processing — ack (don't retry)
-        logger.warning("Spectrum not found, skipping: %s/%s", tenant_id, spectrum_id)
-        return
+        # Permanent failure: metadata gone (deleted before processing)
+        raise ValueError(f"Spectrum not found: {tenant_id}/{spectrum_id}")
 
     current_status = metadata.get("status")
     if current_status == STATUS_ANALYZED:
