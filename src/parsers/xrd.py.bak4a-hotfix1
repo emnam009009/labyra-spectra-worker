@@ -11,7 +11,6 @@ import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks, savgol_filter
 
-from src.parsers._tabular import parse_csv_two_column, parse_xlsx_two_column
 from src.parsers._utils import downsample_curve
 
 logger = logging.getLogger(__name__)
@@ -165,45 +164,3 @@ def parse_xrd_with_citation(
     )
     parsed["citation"] = citation_result
     return parsed
-
-
-# ============================================================
-# R160-spectra-4a-hotfix1: Excel support
-# ============================================================
-def parse_xrd_bytes(raw_bytes: bytes, filename: str) -> dict[str, Any]:
-    """Parse XRD from raw bytes. Routes to .xlsx parser if .xlsx, else text."""
-    if filename.lower().endswith(".xlsx"):
-        result = parse_xlsx_two_column(raw_bytes)
-        if result is None:
-            raise ValueError("Could not parse XLSX (no valid 2theta+intensity columns)")
-        x, y = result
-        return _build_xrd_result(x, y)
-    # Decode bytes as text
-    try:
-        text = raw_bytes.decode("utf-8")
-    except UnicodeDecodeError:
-        text = raw_bytes.decode("latin-1", errors="replace")
-    return parse_xrd(text)
-
-
-def _build_xrd_result(x: np.ndarray, y: np.ndarray) -> dict[str, Any]:
-    """Build XRD result dict from x,y arrays (shared with parse_xrd)."""
-    from src.parsers.xrd import _detect_xrd_peaks, _scherrer_size, _williamson_hall, CU_KA1_ANGSTROM, downsample_curve
-    peaks = _detect_xrd_peaks(x, y)
-    scherrer = _scherrer_size(peaks, CU_KA1_ANGSTROM) if peaks else None
-    wh = _williamson_hall(peaks, CU_KA1_ANGSTROM) if peaks else None
-    return {
-        "spectrum_type": "xrd",
-        "peaks": peaks,
-        "spectrum_curve": downsample_curve(x, y, target_points=500),
-        "quick_stats": {
-            "rowCount": int(len(x)),
-            "xRange": [float(round(x.min(), 2)), float(round(x.max(), 2))],
-            "yRange": [float(round(y.min(), 1)), float(round(y.max(), 1))],
-            "peakCount": len(peaks),
-        },
-        "scherrer_avg_nm": float(round(scherrer, 2)) if scherrer else None,
-        "williamson_hall": wh,
-        "wavelength_angstrom": CU_KA1_ANGSTROM,
-        "source": "Cu-Kα1",
-    }

@@ -140,12 +140,7 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
 
     # 4. Download raw bytes
     gs_url = metadata["storage"]["raw"]
-    # For xlsx (binary), use download_bytes; else text
-    original_filename_for_dl = metadata.get("originalFilename", "")
-    if original_filename_for_dl.lower().endswith(".xlsx"):
-        raw_text = download_bytes(gs_url)  # bytes for openpyxl
-    else:
-        raw_text = download_text(gs_url)
+    raw_text = download_text(gs_url)
 
     # 5. Parse
     parsed = parser(raw_text)

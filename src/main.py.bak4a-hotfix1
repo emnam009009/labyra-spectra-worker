@@ -111,41 +111,19 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
     chemical_formula = metadata.get("chemicalFormula") or metadata.get("chemical_formula")
     
     # XRD: use citation-enabled parser (lookup COD + MP candidates)
-    # Also support .xlsx via bytes-aware wrapper
     if spectrum_type == "xrd":
-        from src.parsers.xrd import parse_xrd_with_citation, parse_xrd_bytes
-        original_filename = metadata.get("originalFilename", "")
-        if original_filename.lower().endswith(".xlsx"):
-            def parser(raw_bytes_or_text):
-                # If raw is bytes, parse xlsx; else fall through to text
-                raw_bytes = raw_bytes_or_text if isinstance(raw_bytes_or_text, bytes) else raw_bytes_or_text.encode("utf-8")
-                parsed = parse_xrd_bytes(raw_bytes, original_filename)
-                # Attach citation
-                from src.citation.lookup import lookup_xrd_candidates
-                if parsed.get("peaks"):
-                    parsed["citation"] = lookup_xrd_candidates(
-                        parsed["peaks"],
-                        sample_label=sample_label,
-                        chemical_formula=chemical_formula,
-                    )
-                return parsed
-        else:
-            parser = lambda raw: parse_xrd_with_citation(
-                raw,
-                sample_label=sample_label,
-                chemical_formula=chemical_formula,
-            )
+        from src.parsers.xrd import parse_xrd_with_citation
+        parser = lambda raw: parse_xrd_with_citation(
+            raw,
+            sample_label=sample_label,
+            chemical_formula=chemical_formula,
+        )
     else:
         parser = get_parser(spectrum_type)
 
     # 4. Download raw bytes
     gs_url = metadata["storage"]["raw"]
-    # For xlsx (binary), use download_bytes; else text
-    original_filename_for_dl = metadata.get("originalFilename", "")
-    if original_filename_for_dl.lower().endswith(".xlsx"):
-        raw_text = download_bytes(gs_url)  # bytes for openpyxl
-    else:
-        raw_text = download_text(gs_url)
+    raw_text = download_text(gs_url)
 
     # 5. Parse
     parsed = parser(raw_text)
