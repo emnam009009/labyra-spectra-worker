@@ -1,4 +1,4 @@
-"""Anthropic analyzer with type dispatch. @phase R160-spectra-3c-hotfix3"""
+"""Anthropic analyzer with type dispatch. @phase R160-spectra-3c-hotfix"""
 
 from __future__ import annotations
 
@@ -14,18 +14,6 @@ from src.config import get_settings
 logger = logging.getLogger(__name__)
 
 
-REQUIRED_FIELDS: dict[str, set[str]] = {
-    "xrd": {"summary", "phases", "overall_confidence"},
-    "uvvis": {"summary", "bandgap", "overall_confidence"},
-    "uvvis_drs": {"summary", "bandgap", "overall_confidence"},
-    "raman": {"summary", "vibrational_modes", "overall_confidence"},
-    "ftir": {"summary", "functional_groups", "overall_confidence"},
-    "tga": {"summary", "stages_interpretation", "overall_confidence"},
-    "dsc": {"summary", "thermal_events", "overall_confidence"},
-    "ocp": {"summary", "stability_assessment", "overall_confidence"},
-}
-
-
 def analyze(parsed: dict[str, Any], metadata: dict[str, Any], locale: str) -> dict[str, Any]:
     settings = get_settings()
     client = Anthropic(api_key=settings.anthropic_api_key)
@@ -35,8 +23,8 @@ def analyze(parsed: dict[str, Any], metadata: dict[str, Any], locale: str) -> di
     user = build_user_prompt(parsed, metadata)
 
     logger.info(
-        "AI analyze: type=%s, locale=%s, model=%s",
-        spectrum_type, locale, settings.anthropic_model,
+        "AI analyze: type=%s, locale=%s, model=%s, peaks=%d",
+        spectrum_type, locale, settings.anthropic_model, len(parsed.get("peaks", [])),
     )
 
     response = client.messages.create(
@@ -59,7 +47,15 @@ def analyze(parsed: dict[str, Any], metadata: dict[str, Any], locale: str) -> di
         logger.exception("AI returned invalid JSON. Raw: %s", raw[:500])
         raise ValueError(f"AI returned non-JSON: {exc}") from exc
 
-    required = REQUIRED_FIELDS.get(spectrum_type, {"summary", "overall_confidence"})
+    REQUIRED = {
+        "xrd": {"summary", "phases", "overall_confidence"},
+        "uvvis": {"summary", "bandgap", "overall_confidence"},
+        "uvvis_drs": {"summary", "bandgap", "overall_confidence"},
+        "raman": {"summary", "vibrational_modes", "overall_confidence"},
+        "ftir": {"summary", "functional_groups", "overall_confidence"},
+    }
+    required = REQUIRED.get(spectrum_type, {"summary", "overall_confidence"})
+
     missing = required - set(parsed_json.keys())
     if missing:
         raise ValueError(f"AI response missing fields for {spectrum_type}: {missing}")

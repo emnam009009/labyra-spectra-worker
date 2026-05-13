@@ -20,8 +20,8 @@ class Settings(BaseSettings):
 
     default_locale: str = "en"
 
-    # R160-spectra-3c-hotfix3: TGA + DSC + OCP added
-    analysis_version: str = "spectra-3c-hotfix3-1.0.2"
+    # R160-spectra-3c-hotfix: spectrum curves + UV-Vis DRS
+    analysis_version: str = "spectra-3c-hotfix-1.0.1"
 
     delete_raw_after_analyze: bool = False
     max_peaks: int = 30
