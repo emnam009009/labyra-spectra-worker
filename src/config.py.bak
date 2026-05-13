@@ -8,27 +8,28 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """Environment-driven config. Cloud Run injects via env vars."""
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # GCP
     gcp_project_id: str = "labyra-app-dev"
     gcp_region: str = "asia-southeast1"
-    firebase_bucket: str = ""
+    firebase_bucket: str = ""  # e.g. "labyra-app-dev.firebasestorage.app"
 
     # Anthropic
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-sonnet-4-5-20250929"
+    anthropic_model: str = "claude-sonnet-4-5-20250929"  # Sonnet 4.6 alias
     anthropic_max_tokens: int = 4096
 
     # Locale fallback
     default_locale: str = "en"
 
-    # Analysis version — bump when prompts/parsers change.
-    # R160-spectra-3a: xrd-1.0.0
-    # R160-spectra-3c: 4 types live
-    analysis_version: str = "spectra-3c-1.0.0"
+    # Analysis version (bump when prompt/parser changes meaningfully)
+    analysis_version: str = "xrd-1.0.0"
 
-    delete_raw_after_analyze: bool = False
+    # Behavior
+    delete_raw_after_analyze: bool = False  # GCS lifecycle handles this; worker just flags
     max_peaks: int = 30
 
 
