@@ -21,7 +21,7 @@ from src.firestore_client import (
     write_analysis_result,
     write_quick_stats,
 )
-from src.gcs_client import download_text
+from src.gcs_client import download_bytes, download_text
 from src.parsers import get_parser
 
 logger = logging.getLogger(__name__)
