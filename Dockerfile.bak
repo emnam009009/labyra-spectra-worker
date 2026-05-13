@@ -28,6 +28,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Runtime deps only (no build-essential)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgfortran5 \
     libgomp1 \
@@ -36,9 +37,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /install /usr/local
 COPY src/ /app/src/
 
+# Non-root user for security
 RUN useradd --create-home --uid 1000 worker && chown -R worker:worker /app
 USER worker
 
 EXPOSE 8080
 
+# Cloud Run sends HTTP requests; FastAPI receives Pub/Sub push messages
 CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]

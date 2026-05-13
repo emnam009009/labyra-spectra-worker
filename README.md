@@ -6,58 +6,66 @@ Python worker for spectrum parsing + AI analysis. Part of [Labyra Platform](http
 
 ```
 labyra-app (Next.js)
-    ↓ publish
-Pub/Sub topic: spectra-analysis
-    ↓ push subscription
-Cloud Run service: spectra-worker (this repo)
+    ↓ publish to Pub/Sub topic 'spectra-analysis'
+    ↓ {tenantId, spectrumId, spectrumType}
+Cloud Run service 'spectra-worker' (this repo)
     ↓
-1. Parse SpectrumMetadata from Firestore
-2. Download raw file from GCS
-3. Run parser (pymatgen / lmfit / custom)
-4. Call Anthropic Claude Sonnet 4.6 for interpretation
-5. Write AnalysisResult to Firestore
+1. Load SpectrumMetadata from Firestore
+2. Transition status: queued → processing
+3. Download raw file from GCS
+4. Parse (XRD: scipy.find_peaks + Williamson-Hall)
+5. Resolve tenant locale (vi/en)
+6. Call Anthropic Sonnet 4.6 with hybrid prompt
+7. Write AnalysisResult to /tenants/{tid}/spectra/{sid}/analysis/latest
+8. Transition status: analyzed
 ```
 
-See [`labyra-app/docs/labrya-experiment-database-report.md`](https://github.com/labyra-platform/labyra-app/blob/main/docs/labrya-experiment-database-report.md) for full data flow.
+## Supported spectrum types (R160-spectra-3a)
+
+- ✅ XRD — peaks + Williamson-Hall + AI phase ID
+
+Planned (spectra-3c, 3d):
+- UV-Vis, Raman, FTIR, PL, XPS
 
 ## Local dev
 
 ```bash
-# Setup
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-
-# Run locally (requires service-account.json + .env)
-uvicorn src.main:app --reload --port 8080
-
-# Test webhook locally
-curl -X POST http://localhost:8080/pubsub \
-  -H "Content-Type: application/json" \
-  -d '{"message": {"data": "eyJzcGVjdHJ1bUlkIjoidGVzdCJ9"}}'
+ruff check src tests
+mypy src
+pytest -v
 ```
 
 ## Deploy
 
 ```bash
-# Build + push to Artifact Registry
-gcloud builds submit --tag asia-southeast1-docker.pkg.dev/labyra-prod/labyra-docker/spectra-worker:latest
+# Pre-req: r160-spectra-3-gcp-setup-v2.sh has run (GCP infra ready)
+bash deploy.sh
+```
 
-# Deploy to Cloud Run
-gcloud run deploy spectra-worker \
-  --image asia-southeast1-docker.pkg.dev/labyra-prod/labyra-docker/spectra-worker:latest \
-  --region asia-southeast1 \
-  --service-account spectra-worker@labyra-prod.iam.gserviceaccount.com \
-  --no-allow-unauthenticated \
-  --memory 2Gi \
-  --cpu 2 \
-  --timeout 540
+Deploy script handles:
+- Cloud Build (Python image)
+- Cloud Run service (private, SA auth)
+- Pub/Sub push subscription (creates or updates endpoint)
+- DLQ + 3-retry policy
+
+## Test end-to-end
+
+```bash
+# Publish test message
+gcloud pubsub topics publish spectra-analysis \
+  --message='{"tenantId":"YOUR_TENANT","spectrumId":"REAL_SPECTRUM_ID"}'
+
+# Check logs
+gcloud run services logs read spectra-worker --region=asia-southeast1 --limit=50
 ```
 
 ## Roadmap
 
-- [ ] R160-spectra-3a — Scaffold + echo handler
-- [ ] R160-spectra-3b — XRD parser end-to-end
-- [ ] R160-spectra-3c — UV-Vis + Raman parsers
-- [ ] R160-spectra-3d — AI analysis layer
-- [ ] R160-spectra-3e — Error handling + retry
+- [x] R160-spectra-3a — Scaffold + XRD parser + AI + Cloud Run
+- [ ] R160-spectra-3c — UV-Vis + Raman + FTIR parsers
+- [ ] R160-spectra-3d — Frontend AnalysisResult display
+- [ ] R160-spectra-3e — Error handling + DLQ inspector UI
+- [ ] R160-spectra-3f — EIS (impedance.py) + electrochemistry
