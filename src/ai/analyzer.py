@@ -42,6 +42,7 @@ def analyze(parsed: dict[str, Any], metadata: dict[str, Any], locale: str) -> di
     response = client.messages.create(
         model=settings.anthropic_model,
         max_tokens=settings.anthropic_max_tokens,
+        temperature=0,  # R161: deterministic output for reproducibility
         system=system,
         messages=[{"role": "user", "content": user}],
     )

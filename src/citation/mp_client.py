@@ -46,9 +46,41 @@ def search_mp_by_formula(formula: str, *, max_results: int = MP_MAX_RESULTS) -> 
         "theoretical",
         "database_IDs",
     ])
+    # Capitalize formula using periodic table element matching
+    # MP API strict: WO3 not wo3, Fe2O3 not fe2o3
+    import re
+    ELEMENTS = {
+        'H','He','Li','Be','B','C','N','O','F','Ne','Na','Mg','Al','Si','P','S','Cl','Ar',
+        'K','Ca','Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn','Ga','Ge','As','Se','Br','Kr',
+        'Rb','Sr','Y','Zr','Nb','Mo','Tc','Ru','Rh','Pd','Ag','Cd','In','Sn','Sb','Te','I','Xe',
+        'Cs','Ba','La','Ce','Pr','Nd','Pm','Sm','Eu','Gd','Tb','Dy','Ho','Er','Tm','Yb','Lu',
+        'Hf','Ta','W','Re','Os','Ir','Pt','Au','Hg','Tl','Pb','Bi','Po','At','Rn',
+        'Fr','Ra','Ac','Th','Pa','U','Np','Pu','Am','Cm','Bk','Cf','Es','Fm','Md','No','Lr',
+        'Rf','Db','Sg','Bh','Hs','Mt','Ds','Rg','Cn','Nh','Fl','Mc','Lv','Ts','Og'
+    }
+    # Build lowercase map for quick lookup
+    ELEMENTS_LOWER = {e.lower(): e for e in ELEMENTS}
+
+    def _tokenize_formula(f: str) -> str:
+        result = []
+        i = 0
+        while i < len(f):
+            ch = f[i]
+            # Try 2-char element first (greedy)
+            if i + 1 < len(f) and f[i:i+2].lower() in ELEMENTS_LOWER:
+                result.append(ELEMENTS_LOWER[f[i:i+2].lower()])
+                i += 2
+            elif ch.lower() in ELEMENTS_LOWER:
+                result.append(ELEMENTS_LOWER[ch.lower()])
+                i += 1
+            else:
+                # Digits, parens, operators - keep as-is
+                result.append(ch)
+                i += 1
+        return ''.join(result)
+    capitalized = _tokenize_formula(formula)
     params = {
-        "formula": formula,
-        "theoretical": "false",
+        "formula": capitalized,
         "energy_above_hull_max": str(MP_STABILITY_THRESHOLD_EV),
         "_fields": fields,
         "_limit": str(max_results),
