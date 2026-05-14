@@ -112,6 +112,8 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
     chemical_formula = metadata.get("chemicalFormula") or metadata.get("chemical_formula")
     anode = metadata.get("anode")  # X-ray anode: Cu/Mo/Co/Cr/Fe/Ag, default Cu
     monochromator = metadata.get("monochromator")  # none/ni_filter/graphite/ge111/johansson/si220
+    profile_function = metadata.get("profileFunction") or "pseudo_voigt"  # R161-phase-E
+    zero_shift = float(metadata.get("zeroShift") or 0.0)  # 2θ correction in degrees
     
     # XRD: use citation-enabled parser (lookup COD + MP candidates)
     # Also support .xlsx via bytes-aware wrapper
@@ -122,16 +124,31 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
             def parser(raw_bytes_or_text):
                 # If raw is bytes, parse xlsx; else fall through to text
                 raw_bytes = raw_bytes_or_text if isinstance(raw_bytes_or_text, bytes) else raw_bytes_or_text.encode("utf-8")
-                parsed = parse_xrd_bytes(raw_bytes, original_filename, anode=anode, monochromator=monochromator)
-                # Attach citation
+                parsed = parse_xrd_bytes(
+                    raw_bytes, original_filename,
+                    anode=anode,
+                    monochromator=monochromator,
+                    profile=profile_function,
+                    zero_shift=zero_shift,
+                )
+                # Wire hkl from top candidate into peaks (matches parse_xrd_with_citation behavior)
                 from src.citation.lookup import lookup_xrd_candidates
                 if parsed.get("peaks"):
-                    parsed["citation"] = lookup_xrd_candidates(
+                    citation_result = lookup_xrd_candidates(
                         parsed["peaks"],
                         sample_label=sample_label,
                         chemical_formula=chemical_formula,
                         filename=original_filename,
                     )
+                    parsed["citation"] = citation_result
+                    candidates = citation_result.get("candidates", [])
+                    if candidates:
+                        top = candidates[0]
+                        user_hkl_map = top.get("user_hkl_map", {})
+                        for user_idx, hkl in user_hkl_map.items():
+                            idx = int(user_idx) if isinstance(user_idx, str) else user_idx
+                            if 0 <= idx < len(parsed["peaks"]) and hkl:
+                                parsed["peaks"][idx]["hkl"] = " ".join(str(int(v)) for v in hkl)
                 return parsed
         else:
             parser = lambda raw: parse_xrd_with_citation(
@@ -141,6 +158,8 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
                 filename=original_filename,
                 anode=anode,
                 monochromator=monochromator,
+                profile=profile_function,
+                zero_shift=zero_shift,
             )
     else:
         parser = get_parser(spectrum_type)
