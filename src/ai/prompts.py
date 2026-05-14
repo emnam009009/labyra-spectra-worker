@@ -12,21 +12,43 @@ You receive a parsed peak list with 2theta positions, intensities, FWHM, plus op
 Williamson-Hall fit results.
 
 You may also receive a 'citation_candidates' list of materials matched against the user's peaks
-from Crystallography Open Database (COD) or Materials Project (MP). Each candidate includes
-formula, space group, lattice parameters, simulated_peaks, and a match_score (0..1).
+from internal tenant library, Crystallography Open Database (COD), or Materials Project (MP).
+Each candidate includes formula, space group, lattice parameters, simulated_peaks, and a
+match_score (0..1).
 
-CRITICAL CITATION RULES:
-- If candidates are provided, you MUST select the best match based on (a) match_score,
-  (b) formula consistency, (c) space group plausibility for the sample type.
-- For EACH phase you identify, include a 'source' field:
-    {"type": "COD" | "MP" | "unverified", "id": "<COD or MP id>", "doi": "<doi if available>"}
-- DO NOT invent COD or MP IDs. Use "unverified" if no candidate matches.
-- If match_score < 0.4 for all candidates, prefer "unverified" — do not force a citation.
+CRITICAL CITATION RULES (R162-strict-grounding):
+
+  RULE 1 — RANKING IS AUTHORITATIVE.
+    candidates are pre-sorted descending by match_score. candidates[0] is THE best match.
+    You MUST NOT re-rank by your own judgment of "structural plausibility" or "space group fit".
+    The score already accounts for peak position + intensity overlap.
+
+  RULE 2 — TOP CANDIDATE SELECTION.
+    If candidates[0].match_score >= 0.4:
+      → phases[0].source MUST be {type, id, doi} copied from candidates[0].
+      → phases[0].name should describe the formula + space group from candidates[0].
+    If candidates[0].match_score < 0.4:
+      → phases[0].source = {"type": "unverified", "id": null, "doi": null}.
+      → Do not pick a lower-ranked candidate to force a citation.
+
+  RULE 3 — SECONDARY PHASES.
+    Additional phases (if multi-phase sample) take from candidates[1], candidates[2], etc.
+    in order. Skip a candidate only if its formula is identical to an already-included one
+    AND its match_score < 0.5 * candidates[0].match_score.
+
+  RULE 4 — NO INVENTION.
+    DO NOT invent COD or MP IDs. Every id in 'source' must appear verbatim in the
+    candidates list, or be null with type='unverified'.
+
+  RULE 5 — INTERNAL LIBRARY.
+    type='internal' means tenant-uploaded reference card. Treat with same trust level as
+    COD/MP (the user vouched for it). Use id verbatim. The library card may lack lattice
+    params — that is fine, do not flag as low quality for that reason alone.
 
 Your job:
-1. Identify the dominant crystal phase(s) — use citation_candidates as ground truth when available.
+1. Identify the dominant crystal phase(s) — RULE 2 governs phase[0].
 2. Comment on crystallite size and microstrain.
-3. Flag impurity peaks.
+3. Flag impurity peaks NOT covered by any candidate.
 4. Provide confidence + next steps.
 
 CRITICAL: Use plain ASCII for units in JSON values (cm-1, sp2, sp3).
@@ -36,22 +58,42 @@ XRD_SYSTEM_VI = """Bạn là chuyên gia phân tích XRD.
 
 Bạn nhận peaks (2theta), intensity, FWHM, Williamson-Hall fit.
 
-Bạn cũng có thể nhận 'citation_candidates' — danh sách materials match từ Crystallography Open
-Database (COD) và Materials Project (MP). Mỗi candidate có formula, space group, lattice,
-simulated_peaks, và match_score (0..1).
+Bạn cũng có thể nhận 'citation_candidates' — danh sách materials match từ tenant library nội bộ,
+Crystallography Open Database (COD), hoặc Materials Project (MP). Mỗi candidate có formula,
+space group, lattice, simulated_peaks, và match_score (0..1).
 
-QUY TẮC CITATION QUAN TRỌNG:
-- Nếu có candidates, BẮT BUỘC chọn best match dựa trên (a) match_score, (b) formula consistency,
-  (c) space group plausibility.
-- MỖI phase phải có field 'source':
-    {"type": "COD" | "MP" | "unverified", "id": "<COD or MP id>", "doi": "<doi nếu có>"}
-- TUYỆT ĐỐI KHÔNG tự bịa COD/MP ID. Dùng "unverified" nếu không có match.
-- Nếu match_score < 0.4 cho tất cả candidates, prefer "unverified" — không gượng ép citation.
+QUY TẮC CITATION NGHIÊM NGẶT (R162-strict-grounding):
+
+  RULE 1 — RANKING LÀ CHÍNH XÁC.
+    candidates đã sort giảm dần theo match_score. candidates[0] LÀ best match.
+    TUYỆT ĐỐI KHÔNG được re-rank bằng đánh giá chủ quan về "structural plausibility" hoặc
+    "space group hợp lý". Score đã tính đầy đủ peak position + intensity overlap.
+
+  RULE 2 — CHỌN TOP CANDIDATE.
+    Nếu candidates[0].match_score >= 0.4:
+      → phases[0].source PHẢI là {type, id, doi} copy từ candidates[0].
+      → phases[0].name mô tả formula + space group của candidates[0].
+    Nếu candidates[0].match_score < 0.4:
+      → phases[0].source = {"type": "unverified", "id": null, "doi": null}.
+      → KHÔNG được pick candidate thấp hơn để gượng ép citation.
+
+  RULE 3 — PHASE PHỤ.
+    Các phase phụ (nếu mẫu multi-phase) lấy từ candidates[1], [2], ... theo thứ tự.
+    Bỏ qua candidate chỉ khi formula trùng với phase đã include AND match_score < 0.5 *
+    candidates[0].match_score.
+
+  RULE 4 — KHÔNG BỊA.
+    TUYỆT ĐỐI KHÔNG tự bịa COD/MP ID. Mọi id trong 'source' phải có nguyên văn trong
+    candidates list, hoặc null với type='unverified'.
+
+  RULE 5 — INTERNAL LIBRARY.
+    type='internal' nghĩa là reference card user upload. Trust ngang COD/MP. Dùng id nguyên văn.
+    Card có thể thiếu lattice params — bình thường, không hạ confidence chỉ vì lý do đó.
 
 Nhiệm vụ:
-1. Xác định pha tinh thể chủ đạo — dùng citation_candidates làm ground truth khi có.
+1. Xác định pha tinh thể chủ đạo — RULE 2 chi phối phases[0].
 2. Nhận xét crystallite size + microstrain.
-3. Cảnh báo đỉnh tạp chất.
+3. Cảnh báo đỉnh tạp chất KHÔNG match candidate nào.
 4. Confidence + next steps.
 
 CRITICAL: Plain ASCII (cm-1, sp2). Chỉ trả JSON."""
@@ -319,7 +361,11 @@ Peaks (top {n_peaks_shown}):
 Scherrer avg: {scherrer_nm} nm
 Williamson-Hall: {wh_json}
 
-citation_candidates: {citation_json}
+citation_candidates (sorted by match_score descending; index 0 = top match):
+{citation_json}
+
+CRITICAL: per SYSTEM RULE 2, if candidates[0].match_score >= 0.4, your phases[0].source
+MUST copy id and type from candidates[0]. Do not re-rank.
 
 Provide analysis as JSON:
 {{
@@ -561,10 +607,19 @@ def build_user_prompt(parsed: dict, metadata: dict) -> str:
     if spectrum_type == "xrd":
         import json as _json
         citation_data = parsed.get("citation") or {}
+        # R162-strict-grounding: tag top candidate explicitly so AI cannot miss ranking
+        raw_candidates = sorted(
+            citation_data.get("candidates") or [],
+            key=lambda c: c.get("match_score") or 0.0,
+            reverse=True,
+        )
         citation_compact = {
             "formula_used": citation_data.get("formula_used"),
+            "ranking_note": "candidates pre-sorted by match_score DESC; index 0 = top",
             "candidates": [
                 {
+                    "rank": i,
+                    "is_top": i == 0,
                     "source": c["citation"]["source"],
                     "id": c["citation"]["id"],
                     "doi": c["citation"].get("doi"),
@@ -580,7 +635,7 @@ def build_user_prompt(parsed: dict, metadata: dict) -> str:
                         for p in (c.get("simulated_peaks") or [])[:8]
                     ],
                 }
-                for c in (citation_data.get("candidates") or [])
+                for i, c in enumerate(raw_candidates)
             ],
         }
         return XRD_USER_TEMPLATE.format(
