@@ -9,6 +9,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import curve_fit
 from scipy.signal import find_peaks, savgol_filter
 
 from src.parsers._tabular import parse_csv_two_column, parse_xlsx_two_column
@@ -18,6 +19,83 @@ logger = logging.getLogger(__name__)
 
 # Cu K-alpha1 wavelength in Angstroms (most common XRD source)
 CU_KA1_ANGSTROM = 1.5406
+
+# Profile function types (R161-phase-E)
+PROFILE_GAUSSIAN = "gaussian"
+PROFILE_LORENTZIAN = "lorentzian"
+PROFILE_PSEUDOVOIGT = "pseudo_voigt"
+DEFAULT_PROFILE = PROFILE_PSEUDOVOIGT  # Most realistic for typical lab XRD
+
+
+def _gaussian(x, amp, center, fwhm):
+    sigma = fwhm / (2 * math.sqrt(2 * math.log(2)))
+    return amp * np.exp(-((x - center) ** 2) / (2 * sigma ** 2))
+
+
+def _lorentzian(x, amp, center, fwhm):
+    gamma = fwhm / 2
+    return amp * (gamma ** 2) / ((x - center) ** 2 + gamma ** 2)
+
+
+def _pseudo_voigt(x, amp, center, fwhm, eta):
+    # eta: 0 = pure Gaussian, 1 = pure Lorentzian
+    return eta * _lorentzian(x, amp, center, fwhm) + (1 - eta) * _gaussian(x, amp, center, fwhm)
+
+
+def _fit_peak_profile(
+    x: np.ndarray,
+    y: np.ndarray,
+    peak_idx: int,
+    initial_fwhm: float,
+    profile: str = DEFAULT_PROFILE,
+    window_pts: int = 15,
+) -> dict[str, float] | None:
+    """Fit selected profile function to peak around peak_idx.
+
+    Returns {fwhm, eta, amp, center, r_squared} or None on failure.
+    """
+    try:
+        # Extract window around peak
+        i_start = max(0, peak_idx - window_pts)
+        i_end = min(len(x), peak_idx + window_pts + 1)
+        x_win = x[i_start:i_end]
+        y_win = y[i_start:i_end]
+        # Subtract local baseline
+        baseline = float(np.min(y_win))
+        y_fit = y_win - baseline
+        amp_init = float(y_fit.max())
+        center_init = float(x[peak_idx])
+
+        if profile == PROFILE_GAUSSIAN:
+            p0 = [amp_init, center_init, initial_fwhm]
+            popt, _ = curve_fit(_gaussian, x_win, y_fit, p0=p0, maxfev=2000)
+            y_pred = _gaussian(x_win, *popt)
+            result = {"amp": popt[0], "center": popt[1], "fwhm": popt[2], "eta": 0.0}
+        elif profile == PROFILE_LORENTZIAN:
+            p0 = [amp_init, center_init, initial_fwhm]
+            popt, _ = curve_fit(_lorentzian, x_win, y_fit, p0=p0, maxfev=2000)
+            y_pred = _lorentzian(x_win, *popt)
+            result = {"amp": popt[0], "center": popt[1], "fwhm": popt[2], "eta": 1.0}
+        else:  # pseudo_voigt
+            p0 = [amp_init, center_init, initial_fwhm, 0.5]
+            popt, _ = curve_fit(
+                _pseudo_voigt, x_win, y_fit, p0=p0,
+                bounds=([0, x_win[0], 0, 0], [np.inf, x_win[-1], 5, 1]),
+                maxfev=2000,
+            )
+            y_pred = _pseudo_voigt(x_win, *popt)
+            result = {"amp": popt[0], "center": popt[1], "fwhm": popt[2], "eta": popt[3]}
+
+        # R² goodness of fit
+        ss_res = float(np.sum((y_fit - y_pred) ** 2))
+        ss_tot = float(np.sum((y_fit - y_fit.mean()) ** 2))
+        r_squared = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
+        result["r_squared"] = max(0.0, r_squared)
+        return result
+    except Exception:  # noqa: BLE001
+        return None
+
+
 K_SCHERRER = 0.94
 
 # X-ray anode Kα1 wavelengths (Angstroms)
@@ -82,7 +160,11 @@ def _parse_two_column(text: str) -> tuple[np.ndarray, np.ndarray]:
     raise ValueError("Could not parse two-column XRD data")
 
 
-def _detect_peaks(x: np.ndarray, y: np.ndarray, *, max_peaks: int = 30) -> list[dict[str, float]]:
+def _detect_peaks(
+    x: np.ndarray, y: np.ndarray, *,
+    max_peaks: int = 30,
+    profile: str = DEFAULT_PROFILE,
+) -> list[dict[str, float]]:
     if len(y) >= 21:
         y_smooth = savgol_filter(y, window_length=11, polyorder=3)
     else:
@@ -102,18 +184,40 @@ def _detect_peaks(x: np.ndarray, y: np.ndarray, *, max_peaks: int = 30) -> list[
     y_max = y_smooth.max()
     for i, idx in enumerate(peak_idx):
         dx = float(x[1] - x[0]) if len(x) > 1 else 0.0
-        fwhm = float(widths[i]) * dx
+        rough_fwhm = float(widths[i]) * dx
         two_theta = float(x[idx])
         intensity = float(y_smooth[idx])
-        # Integral breadth β = peak_area / peak_height (Gaussian approx: β = FWHM·sqrt(π/(4ln2)))
-        beta = fwhm * 1.0645 if fwhm > 0 else 0.0  # Gaussian profile
+
+        # Profile function fit (R161-phase-E)
+        fit = _fit_peak_profile(x, y_smooth, idx, rough_fwhm, profile=profile)
+        if fit and fit.get("r_squared", 0) > 0.5:
+            fwhm = fit["fwhm"]
+            two_theta = fit["center"]  # refined position
+            profile_eta = fit["eta"]
+            fit_r2 = fit["r_squared"]
+        else:
+            fwhm = rough_fwhm
+            profile_eta = None
+            fit_r2 = None
+
+        # Integral breadth: depends on profile shape
+        # Gaussian: β = FWHM · sqrt(π/(4ln2)) ≈ 1.0645·FWHM
+        # Lorentzian: β = FWHM · π/2 ≈ 1.5708·FWHM
+        # Pseudo-Voigt: weighted by eta
+        if profile_eta is not None:
+            beta = fwhm * (profile_eta * 1.5708 + (1 - profile_eta) * 1.0645)
+        else:
+            beta = fwhm * 1.0645  # default Gaussian
+
         peaks.append({
             "two_theta": float(round(two_theta, 3)),
             "intensity": float(round(intensity, 2)),
             "fwhm": float(round(fwhm, 4)),
-            "integral_breadth": float(round(beta, 4)),  # ° (for Williamson-Hall etc.)
+            "integral_breadth": float(round(beta, 4)),
             "relative_intensity": float(round(intensity / y_max * 100, 1)),
             "prominence": float(round(float(prominences[i]), 2)),
+            "profile_eta": float(round(profile_eta, 3)) if profile_eta is not None else None,
+            "fit_r_squared": float(round(fit_r2, 3)) if fit_r2 is not None else None,
         })
     return peaks
 
@@ -260,12 +364,21 @@ def _williamson_hall(peaks: list[dict[str, float]], wavelength: float = CU_KA1_A
     }
 
 
-def parse_xrd(raw_text: str, *, wavelength: float = CU_KA1_ANGSTROM, anode: str | None = None, monochromator: str | None = None) -> dict[str, Any]:
+def parse_xrd(
+    raw_text: str, *,
+    wavelength: float = CU_KA1_ANGSTROM,
+    anode: str | None = None,
+    monochromator: str | None = None,
+    zero_shift: float = 0.0,
+    profile: str = DEFAULT_PROFILE,
+) -> dict[str, Any]:
     x, y = _parse_two_column(raw_text)
-    # Resolve effective wavelength if anode/monochromator specified
     if anode:
         wavelength = resolve_effective_wavelength(anode, monochromator)
-    return _build_xrd_result(x, y, wavelength=wavelength)
+    # Apply zero shift correction (R161-phase-E)
+    if zero_shift != 0.0:
+        x = x - zero_shift
+    return _build_xrd_result(x, y, wavelength=wavelength, profile=profile)
 
 
 # ============================================================
@@ -279,11 +392,13 @@ def parse_xrd_with_citation(
     filename: str | None = None,
     anode: str | None = None,
     monochromator: str | None = None,
+    zero_shift: float = 0.0,
+    profile: str = DEFAULT_PROFILE,
 ) -> dict:
     """Parse XRD + attach citation candidates if formula resolvable."""
     from src.citation.lookup import lookup_xrd_candidates
 
-    parsed = parse_xrd(raw_text, anode=anode, monochromator=monochromator)
+    parsed = parse_xrd(raw_text, anode=anode, monochromator=monochromator, zero_shift=zero_shift, profile=profile)
     user_peaks = parsed.get("peaks", [])
     if not user_peaks:
         return parsed
@@ -301,7 +416,14 @@ def parse_xrd_with_citation(
 # ============================================================
 # R160-spectra-4a-hotfix1: Excel support
 # ============================================================
-def parse_xrd_bytes(raw_bytes: bytes, filename: str, anode: str | None = None, monochromator: str | None = None) -> dict[str, Any]:
+def parse_xrd_bytes(
+    raw_bytes: bytes,
+    filename: str,
+    anode: str | None = None,
+    monochromator: str | None = None,
+    zero_shift: float = 0.0,
+    profile: str = DEFAULT_PROFILE,
+) -> dict[str, Any]:
     """Parse XRD from raw bytes. Routes to .xlsx parser if .xlsx, else text."""
     if filename.lower().endswith(".xlsx"):
         result = parse_xlsx_two_column(raw_bytes)
@@ -309,18 +431,24 @@ def parse_xrd_bytes(raw_bytes: bytes, filename: str, anode: str | None = None, m
             raise ValueError("Could not parse XLSX (no valid 2theta+intensity columns)")
         x, y = result
         wavelength = resolve_effective_wavelength(anode, monochromator)
-        return _build_xrd_result(x, y, wavelength=wavelength)
+        if zero_shift != 0.0:
+            x = x - zero_shift
+        return _build_xrd_result(x, y, wavelength=wavelength, profile=profile)
     # Decode bytes as text
     try:
-        text = raw_bytes.decode("utf-8")
+        text_str = raw_bytes.decode("utf-8")
     except UnicodeDecodeError:
-        text = raw_bytes.decode("latin-1", errors="replace")
-    return parse_xrd(text)
+        text_str = raw_bytes.decode("latin-1", errors="replace")
+    return parse_xrd(text_str, anode=anode, monochromator=monochromator, zero_shift=zero_shift, profile=profile)
 
 
-def _build_xrd_result(x: np.ndarray, y: np.ndarray, *, wavelength: float = CU_KA1_ANGSTROM) -> dict[str, Any]:
+def _build_xrd_result(
+    x: np.ndarray, y: np.ndarray, *,
+    wavelength: float = CU_KA1_ANGSTROM,
+    profile: str = DEFAULT_PROFILE,
+) -> dict[str, Any]:
     """Build XRD result dict from x,y arrays (shared with parse_xrd)."""
-    raw_peaks = _detect_peaks(x, y)
+    raw_peaks = _detect_peaks(x, y, profile=profile)
     peaks = _enrich_peaks(raw_peaks, wavelength) if raw_peaks else []
     scherrer = _scherrer_crystallite_size(peaks, wavelength) if peaks else None
     wh = _williamson_hall(peaks, wavelength) if peaks else None
