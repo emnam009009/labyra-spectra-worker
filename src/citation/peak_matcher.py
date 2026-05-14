@@ -70,12 +70,21 @@ def match_peaks(
     intensity_term = max(0.0, intensity_correlation) if intensity_correlation is not None else 0.0
     score = 0.7 * match_ratio + 0.3 * intensity_term
 
+    # Build hkl assignment: user_peak_idx → hkl from matched sim peak
+    user_hkl_map: dict[int, list[int]] = {}
+    for user_idx, sim_idx in matched_pairs:
+        sim_peak = simulated_peaks[sim_idx]
+        hkl = sim_peak.get("hkl")
+        if hkl:
+            user_hkl_map[user_idx] = hkl
+
     return {
         "match_ratio": round(match_ratio, 3),
         "matched_count": matched_count,
         "total_user_peaks": len(user_peaks),
         "intensity_correlation": round(intensity_correlation, 3) if intensity_correlation is not None else None,
         "score": round(score, 3),
+        "user_hkl_map": user_hkl_map,
     }
 
 
@@ -86,4 +95,5 @@ def _empty_match(total: int) -> dict[str, Any]:
         "total_user_peaks": total,
         "intensity_correlation": None,
         "score": 0.0,
+        "user_hkl_map": {},
     }

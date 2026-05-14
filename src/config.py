@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     default_locale: str = "en"
 
     # R160-spectra-3c-hotfix3: TGA + DSC + OCP added
-    analysis_version: str = "spectra-4b-1.0.0"
+    analysis_version: str = "spectra-4b-1.1.0"
 
     delete_raw_after_analyze: bool = False
     max_peaks: int = 30
