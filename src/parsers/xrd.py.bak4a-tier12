@@ -98,106 +98,17 @@ def _detect_peaks(x: np.ndarray, y: np.ndarray, *, max_peaks: int = 30) -> list[
 
     peaks = []
     widths = props.get("widths", np.zeros(len(peak_idx)))
-    prominences = props.get("prominences", np.zeros(len(peak_idx)))
     y_max = y_smooth.max()
     for i, idx in enumerate(peak_idx):
         dx = float(x[1] - x[0]) if len(x) > 1 else 0.0
         fwhm = float(widths[i]) * dx
-        two_theta = float(x[idx])
-        intensity = float(y_smooth[idx])
-        # Integral breadth β = peak_area / peak_height (Gaussian approx: β = FWHM·sqrt(π/(4ln2)))
-        beta = fwhm * 1.0645 if fwhm > 0 else 0.0  # Gaussian profile
         peaks.append({
-            "two_theta": float(round(two_theta, 3)),
-            "intensity": float(round(intensity, 2)),
+            "two_theta": float(round(x[idx], 3)),
+            "intensity": float(round(y_smooth[idx], 2)),
             "fwhm": float(round(fwhm, 4)),
-            "integral_breadth": float(round(beta, 4)),  # ° (for Williamson-Hall etc.)
-            "relative_intensity": float(round(intensity / y_max * 100, 1)),
-            "prominence": float(round(float(prominences[i]), 2)),
+            "relative_intensity": float(round(y_smooth[idx] / y_max * 100, 1)),
         })
     return peaks
-
-
-def _enrich_peaks(
-    peaks: list[dict[str, float]],
-    wavelength: float = CU_KA1_ANGSTROM,
-) -> list[dict[str, float]]:
-    """Add per-peak derived properties: d-spacing, Scherrer D, dislocation density, microstrain.
-
-    Returns NEW list with enriched dicts.
-    """
-    enriched = []
-    for p in peaks:
-        theta_rad = math.radians(p["two_theta"] / 2.0)
-        sin_theta = math.sin(theta_rad)
-        cos_theta = math.cos(theta_rad)
-
-        # d-spacing (Bragg's law): d = λ / (2·sinθ)
-        d_spacing = wavelength / (2 * sin_theta) if sin_theta > 0 else None
-
-        # Per-peak Scherrer crystallite size D (nm)
-        fwhm_rad = math.radians(p["fwhm"])
-        D_nm = None
-        if fwhm_rad > 0:
-            D_angstrom = (K_SCHERRER * wavelength) / (fwhm_rad * cos_theta)
-            D_nm = D_angstrom / 10.0
-
-        # Dislocation density δ = 1/D² (lines/m²)
-        dislocation_density = None
-        if D_nm and D_nm > 0:
-            D_m = D_nm * 1e-9  # nm → m
-            dislocation_density = 1.0 / (D_m * D_m)
-
-        # Microstrain ε per-peak: β·cosθ / 4
-        microstrain = None
-        if fwhm_rad > 0:
-            microstrain = (fwhm_rad * cos_theta) / 4.0
-
-        enriched.append({
-            **p,
-            "d_spacing": float(round(d_spacing, 4)) if d_spacing else None,  # Å
-            "crystallite_size_nm": float(round(D_nm, 2)) if D_nm else None,
-            "dislocation_density": float(round(dislocation_density, 3)) if dislocation_density else None,
-            "microstrain": float(round(microstrain, 6)) if microstrain else None,
-        })
-    return enriched
-
-
-def _crystallinity_percent(x: np.ndarray, y: np.ndarray, peaks: list[dict]) -> float | None:
-    """Estimate crystallinity %: (sum of peak areas) / (total area).
-
-    Peak area approximated by I × FWHM (Gaussian: 1.0645·I·FWHM).
-    Total area = trapezoidal integral.
-    """
-    if not peaks or len(y) < 10:
-        return None
-    total_area = float(np.trapezoid(y, x))
-    if total_area <= 0:
-        return None
-    crystalline_area = sum(p["intensity"] * p["fwhm"] * 1.0645 for p in peaks)
-    return float(round(min(100.0, crystalline_area / total_area * 100), 1))
-
-
-def _quality_metrics(x: np.ndarray, y: np.ndarray, peaks: list[dict]) -> dict:
-    """Scan quality + data acquisition metadata."""
-    metrics = {
-        "scan_range_2theta": [float(round(x[0], 3)), float(round(x[-1], 3))],
-        "step_size_deg": float(round((x[-1] - x[0]) / (len(x) - 1), 4)) if len(x) > 1 else 0,
-        "data_points": int(len(x)),
-        "n_peaks_detected": len(peaks),
-    }
-    if peaks:
-        intensities = np.array([p["intensity"] for p in peaks])
-        bg = float(np.percentile(y, 10))  # low percentile as bg estimate
-        noise_std = float(np.std(y[y < np.percentile(y, 30)]))
-        max_intensity = float(intensities.max())
-        metrics["background_estimate"] = float(round(bg, 2))
-        metrics["noise_std"] = float(round(noise_std, 2))
-        metrics["snr"] = float(round(max_intensity / noise_std, 1)) if noise_std > 0 else None
-        metrics["max_intensity"] = float(round(max_intensity, 2))
-        metrics["smallest_fwhm"] = float(round(min(p["fwhm"] for p in peaks), 4))
-        metrics["resolution_estimate"] = metrics["smallest_fwhm"]
-    return metrics
 
 
 def _scherrer_crystallite_size(peaks: list[dict[str, float]], wavelength: float = CU_KA1_ANGSTROM) -> float | None:
@@ -262,10 +173,22 @@ def _williamson_hall(peaks: list[dict[str, float]], wavelength: float = CU_KA1_A
 
 def parse_xrd(raw_text: str, *, wavelength: float = CU_KA1_ANGSTROM, anode: str | None = None, monochromator: str | None = None) -> dict[str, Any]:
     x, y = _parse_two_column(raw_text)
-    # Resolve effective wavelength if anode/monochromator specified
-    if anode:
-        wavelength = resolve_effective_wavelength(anode, monochromator)
-    return _build_xrd_result(x, y, wavelength=wavelength)
+    peaks = _detect_peaks(x, y)
+    return {
+        "spectrum_type": "xrd",
+        "peaks": peaks,
+        "spectrum_curve": downsample_curve(x, y, target_points=500),
+        "quick_stats": {
+            "rowCount": int(len(x)),
+            "xRange": [float(round(x.min(), 2)), float(round(x.max(), 2))],
+            "yRange": [float(round(y.min(), 2)), float(round(y.max(), 2))],
+            "peakCount": len(peaks),
+        },
+        "scherrer_avg_nm": _scherrer_crystallite_size(peaks, wavelength),
+        "williamson_hall": _williamson_hall(peaks, wavelength),
+        "wavelength_angstrom": wavelength,
+        "source": "Cu K-α₁",
+    }
 
 
 # ============================================================
@@ -320,12 +243,9 @@ def parse_xrd_bytes(raw_bytes: bytes, filename: str, anode: str | None = None, m
 
 def _build_xrd_result(x: np.ndarray, y: np.ndarray, *, wavelength: float = CU_KA1_ANGSTROM) -> dict[str, Any]:
     """Build XRD result dict from x,y arrays (shared with parse_xrd)."""
-    raw_peaks = _detect_peaks(x, y)
-    peaks = _enrich_peaks(raw_peaks, wavelength) if raw_peaks else []
+    peaks = _detect_peaks(x, y)
     scherrer = _scherrer_crystallite_size(peaks, wavelength) if peaks else None
     wh = _williamson_hall(peaks, wavelength) if peaks else None
-    crystallinity = _crystallinity_percent(x, y, peaks) if peaks else None
-    quality = _quality_metrics(x, y, peaks)
     return {
         "spectrum_type": "xrd",
         "peaks": peaks,
@@ -338,8 +258,6 @@ def _build_xrd_result(x: np.ndarray, y: np.ndarray, *, wavelength: float = CU_KA
         },
         "scherrer_avg_nm": float(round(scherrer, 2)) if scherrer else None,
         "williamson_hall": wh,
-        "crystallinity_percent": crystallinity,
-        "quality_metrics": quality,
         "wavelength_angstrom": wavelength,
         "source": next((k for k, v in ANODE_WAVELENGTHS.items() if abs(v - wavelength) < 0.001), "Cu") + "-Kα1",
     }

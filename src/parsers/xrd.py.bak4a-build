@@ -262,10 +262,22 @@ def _williamson_hall(peaks: list[dict[str, float]], wavelength: float = CU_KA1_A
 
 def parse_xrd(raw_text: str, *, wavelength: float = CU_KA1_ANGSTROM, anode: str | None = None, monochromator: str | None = None) -> dict[str, Any]:
     x, y = _parse_two_column(raw_text)
-    # Resolve effective wavelength if anode/monochromator specified
-    if anode:
-        wavelength = resolve_effective_wavelength(anode, monochromator)
-    return _build_xrd_result(x, y, wavelength=wavelength)
+    peaks = _detect_peaks(x, y)
+    return {
+        "spectrum_type": "xrd",
+        "peaks": peaks,
+        "spectrum_curve": downsample_curve(x, y, target_points=500),
+        "quick_stats": {
+            "rowCount": int(len(x)),
+            "xRange": [float(round(x.min(), 2)), float(round(x.max(), 2))],
+            "yRange": [float(round(y.min(), 2)), float(round(y.max(), 2))],
+            "peakCount": len(peaks),
+        },
+        "scherrer_avg_nm": _scherrer_crystallite_size(peaks, wavelength),
+        "williamson_hall": _williamson_hall(peaks, wavelength),
+        "wavelength_angstrom": wavelength,
+        "source": "Cu K-α₁",
+    }
 
 
 # ============================================================
