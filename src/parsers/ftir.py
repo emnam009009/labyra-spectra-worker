@@ -15,6 +15,53 @@ from src.parsers._utils import downsample_curve
 logger = logging.getLogger(__name__)
 
 
+def _strip_pe_header(text: str) -> str:
+    """Strip PerkinElmer Spectrum ASCII header.
+
+    PE format: magic line "PE IR" + ~25 header lines + "#DATA" marker
+    + tab-separated wavenumber<TAB>%T data rows.
+
+    Returns text starting from first data row. If not PE format, returns
+    original text unchanged.
+
+    @phase R163-worker-ftir-pe
+    """
+    if not text.startswith("PE IR"):
+        return text
+    # Find #DATA marker (case-sensitive per PE spec)
+    data_idx = text.find("#DATA")
+    if data_idx == -1:
+        return text  # malformed, let parser try anyway
+    # Skip "#DATA\n" or "#DATA\r\n"
+    after_marker = text[data_idx + len("#DATA"):]
+    # Strip leading newlines/whitespace
+    return after_marker.lstrip()
+
+
+def _strip_jcamp_header(text: str) -> str:
+    """Strip JCAMP-DX header (lines starting with ##).
+
+    JCAMP-DX is the IUPAC standard for spectral data. Header lines start
+    with ##LABEL=value. Data section starts after ##XYDATA= or ##PEAK TABLE=.
+
+    @phase R163-worker-ftir-jcamp
+    """
+    if not text.lstrip().startswith("##"):
+        return text
+    lines = text.split("\n")
+    data_start = -1
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("##XYDATA=") or stripped.startswith("##PEAK TABLE=") or stripped.startswith("##XYPOINTS="):
+            data_start = i + 1
+            break
+    if data_start == -1:
+        return text
+    # Filter out trailing ##END= and any remaining ## lines
+    data_lines = [l for l in lines[data_start:] if not l.strip().startswith("##")]
+    return "\n".join(data_lines)
+
+
 def _parse_two_column(text: str) -> tuple[np.ndarray, np.ndarray]:
     for sep in [",", r"\s+", "\t"]:
         try:
@@ -103,6 +150,9 @@ def _identify_functional_groups(peaks: list[dict[str, float]]) -> list[dict[str,
 
 
 def parse_ftir(raw_text: str) -> dict[str, Any]:
+    # R163-worker-ftir-pe: strip vendor-specific headers before parsing
+    raw_text = _strip_pe_header(raw_text)
+    raw_text = _strip_jcamp_header(raw_text)
     x, y = _parse_two_column(raw_text)
     y_mode = _detect_y_mode(y)
     y_abs = _to_absorbance(y, y_mode)
