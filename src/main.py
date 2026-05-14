@@ -186,3 +186,32 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
 
     # GCS lifecycle policy handles raw file deletion after 7 days
     # (configured at bucket level, not per-object)
+
+
+
+# ============================================================
+# R160-spectra-4a-pdf: Reference card parser endpoint
+# ============================================================
+from pydantic import BaseModel
+from src.reference.parser import parse_reference_card
+
+
+class ParseReferenceCardRequest(BaseModel):
+    text: str
+
+
+@app.post("/reference/parse")
+async def parse_reference(req: ParseReferenceCardRequest) -> dict:
+    """Parse user-pasted XRD reference card text into structured peaks.
+
+    Stateless: no auth, no Firestore. Just text → structured data.
+    Persistence handled by app's /api/reference-cards endpoint.
+    """
+    try:
+        result = parse_reference_card(req.text)
+        return {"success": True, "data": result}
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Reference parse failed")
+        return {"success": False, "error": f"unexpected: {exc}"}
