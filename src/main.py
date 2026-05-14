@@ -70,10 +70,20 @@ async def handle_pubsub_push(request: Request) -> None:
         # 400 → no retry (permanent: bad payload)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    # R164-phase-5a: accept both legacy spectrumId + new measurementId (same UUID)
+    # New app (R164+) sends measurementId; legacy app (R160-R163) sends spectrumId.
+    # Internal variable stays `spectrum_id` to avoid touching downstream parsers.
     tenant_id = payload.get("tenantId")
-    spectrum_id = payload.get("spectrumId")
+    spectrum_id = payload.get("measurementId") or payload.get("spectrumId")
+    # Optional `collection` field — switches Firestore path (default "spectra").
+    # Phase 5b app will send "measurements"; legacy sends nothing → falls back.
+    collection = payload.get("collection", "spectra")
     if not tenant_id or not spectrum_id:
-        raise HTTPException(status_code=400, detail="Missing tenantId or spectrumId")
+        raise HTTPException(status_code=400, detail="Missing tenantId or measurementId/spectrumId")
+    logger.info(
+        "Decoded payload: tenant=%s id=%s collection=%s",
+        tenant_id, spectrum_id, collection,
+    )
 
     try:
         _process(tenant_id, spectrum_id)
