@@ -18,6 +18,9 @@ SA_EMAIL="spectra-worker@${PROJECT_ID}.iam.gserviceaccount.com"
 TOPIC="spectra-analysis"
 DLQ="spectra-analysis-dlq"
 SUBSCRIPTION="spectra-worker-push"
+TOPIC_PAPERS="paper-processing"
+DLQ_PAPERS="paper-processing-dlq"
+SUBSCRIPTION_PAPERS="spectra-worker-papers-push"
 FIREBASE_BUCKET="${FIREBASE_BUCKET:-${PROJECT_ID}.firebasestorage.app}"
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -39,14 +42,14 @@ gcloud run deploy "$SERVICE" \
   --region "$REGION" \
   --service-account "$SA_EMAIL" \
   --no-allow-unauthenticated \
-  --memory 2Gi \
+  --memory 4Gi \
   --cpu 2 \
-  --timeout 540 \
+  --timeout 3600 \
   --max-instances 10 \
   --min-instances 0 \
-  --concurrency 5 \
-  --set-env-vars "GCP_PROJECT_ID=${PROJECT_ID},GCP_REGION=${REGION},FIREBASE_BUCKET=${FIREBASE_BUCKET},DEFAULT_LOCALE=en,ANALYSIS_VERSION=xrd-1.0.0" \
-  --set-secrets "ANTHROPIC_API_KEY=anthropic-api-key:latest,MP_API_KEY=mp-api-key:latest" \
+  --concurrency 1 \
+  --set-env-vars "GCP_PROJECT_ID=${PROJECT_ID},GCP_REGION=${REGION},FIREBASE_BUCKET=${FIREBASE_BUCKET},DEFAULT_LOCALE=en,ANALYSIS_VERSION=xrd-1.0.0,PINECONE_INDEX_NAME=labyra-papers" \
+  --set-secrets "ANTHROPIC_API_KEY=anthropic-api-key:latest,MP_API_KEY=mp-api-key:latest,MISTRAL_API_KEY=mistral-api-key:latest,VOYAGE_API_KEY=voyage-api-key:latest,PINECONE_API_KEY=pinecone-api-key:latest" \
   --quiet
 
 SERVICE_URL=$(gcloud run services describe "$SERVICE" --region="$REGION" --format="value(status.url)")
@@ -93,6 +96,22 @@ echo -e "${GREEN}✓ Deploy complete${NC}"
 echo ""
 echo "Service URL:  $SERVICE_URL"
 echo "Push:         $PUSH_ENDPOINT"
+
+# ---------- R167-A: Papers subscription (push endpoint refresh) -------------
+step "R167-A: Papers Pub/Sub subscription"
+
+PAPERS_ENDPOINT="${SERVICE_URL}/papers/process"
+
+if gcloud pubsub subscriptions describe "$SUBSCRIPTION_PAPERS" >/dev/null 2>&1; then
+  gcloud pubsub subscriptions update "$SUBSCRIPTION_PAPERS" \
+    --push-endpoint="$PAPERS_ENDPOINT" \
+    --push-auth-service-account="$SA_EMAIL"
+  ok "Papers subscription updated → $PAPERS_ENDPOINT"
+else
+  warn "Papers subscription '$SUBSCRIPTION_PAPERS' missing"
+  warn "Run one-time setup first: bash round-167a-1-gcloud-papers-pubsub.sh"
+fi
+
 echo "Subscription: $SUBSCRIPTION → $TOPIC (DLQ: $DLQ, max 3 retries)"
 echo ""
 echo "Test:"

@@ -229,6 +229,130 @@ class ParseReferenceCardRequest(BaseModel):
     text: str
 
 
+# ============================================================================
+# R167-A: Papers processing skeleton
+# ----------------------------------------------------------------------------
+# Async pipeline trigger via Pub/Sub push from topic 'paper-processing'.
+# Skeleton (R167-A): acks message + updates Firestore status='received'.
+# Full pipeline (OCR → chunk → embed → index → citations) ships in R167-B.
+#
+# Message shape (ADR-018):
+#   {
+#     "jobId": "uuid",
+#     "tenantId": "tenant-dev-001",
+#     "paperId": "abc123",
+#     "version": 2,
+#     "storagePath": "papers/abc123/file.pdf",
+#     "createdBy": "uid",
+#     "enqueuedAt": 1234567890
+#   }
+# ============================================================================
+
+
+@app.get("/papers/health")
+def papers_health() -> dict[str, str]:
+    """Health check riêng cho papers pipeline."""
+    return {
+        "status": "ok",
+        "subsystem": "papers",
+        "phase": "R167-B6",
+    }
+
+
+@app.post("/papers/process", status_code=status.HTTP_204_NO_CONTENT)
+async def handle_papers_push(request: Request) -> None:
+    """Pub/Sub push subscription endpoint cho paper processing jobs.
+
+    Auth: enforced bởi Cloud Run IAM (--push-auth-service-account).
+    Worker không cần verify OIDC token trong code — Cloud Run reject 401 nếu
+    Pub/Sub không attach valid token.
+
+    Ack semantics (mirror /pubsub measurement handler):
+      - 204 → ack, Pub/Sub không retry
+      - 400 → ack, Pub/Sub KHÔNG retry (permanent: bad payload)
+      - 5xx → nack, Pub/Sub retry với exponential backoff → DLQ sau 5 attempts
+
+    R167-A scope: parse + validate + Firestore status update only.
+    Pipeline call (OCR/embed/index/citations) thêm trong R167-B.
+    """
+    envelope: dict[str, Any] = await request.json()
+    if "message" not in envelope:
+        raise HTTPException(status_code=400, detail="Invalid Pub/Sub envelope")
+
+    message = envelope["message"]
+    encoded = message.get("data", "")
+    if not encoded:
+        logger.warning("papers: empty message data, acking")
+        return
+
+    try:
+        payload: dict[str, Any] = json.loads(base64.b64decode(encoded).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
+        logger.exception("papers: decode failed")
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Validate required fields per ADR-018 message shape
+    job_id = payload.get("jobId")
+    tenant_id = payload.get("tenantId")
+    paper_id = payload.get("paperId")
+    version = payload.get("version")
+    storage_path = payload.get("storagePath")
+
+    missing = [
+        name for name, val in [
+            ("jobId", job_id),
+            ("tenantId", tenant_id),
+            ("paperId", paper_id),
+            ("version", version),
+            ("storagePath", storage_path),
+        ] if val is None
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing required fields: {', '.join(missing)}",
+        )
+
+    message_id = message.get("messageId", "unknown")
+    logger.info(
+        "papers: job=%s tenant=%s paper=%s v=%s msgId=%s",
+        job_id, tenant_id, paper_id, version, message_id,
+    )
+
+    # R167-B6: wire orchestrator. Ack semantics:
+    #   - success           → 204 (Pub/Sub ack)
+    #   - CancelledError    → 204 (user cancelled, ack — no point retrying)
+    #   - FatalError        → 400 (permanent failure, ack — no retry)
+    #   - RetryableError +  → 500 (transient, Pub/Sub retries → DLQ after 5)
+    #     any other Exception
+    from src.papers.orchestrator import process_paper
+    from src.papers.errors import CancelledError as _CancelledError, FatalError as _FatalError
+    from google.cloud import firestore as _firestore
+
+    created_by = payload.get("createdBy", "")
+    db = _firestore.Client(project=get_settings().gcp_project_id)
+
+    try:
+        process_paper(
+            db=db,
+            tenant_id=tenant_id,
+            paper_id=paper_id,
+            storage_path=storage_path,
+            job_id=job_id,
+            created_by=created_by,
+        )
+    except _CancelledError:
+        logger.info("papers: cancelled job=%s paper=%s — acking", job_id, paper_id)
+        return  # 204
+    except _FatalError as exc:
+        # 400 = permanent → Pub/Sub does NOT retry
+        raise HTTPException(status_code=400, detail=str(exc)[:200]) from exc
+    except Exception as exc:  # noqa: BLE001 — final catch for HTTP boundary
+        # 5xx → Pub/Sub retries up to max-delivery-attempts (5) → DLQ
+        logger.exception("papers: pipeline failed job=%s paper=%s", job_id, paper_id)
+        raise HTTPException(status_code=500, detail=str(exc)[:200]) from exc
+
+
 @app.post("/reference/parse")
 async def parse_reference(req: ParseReferenceCardRequest) -> dict:
     """Parse user-pasted XRD reference card text into structured peaks.

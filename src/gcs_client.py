@@ -27,14 +27,34 @@ def parse_gs_url(gs_url: str) -> tuple[str, str]:
     return bucket, path
 
 
-def download_bytes(gs_url: str) -> bytes:
-    bucket_name, blob_path = parse_gs_url(gs_url)
+def _resolve_bucket_and_path(location: str) -> tuple[str, str]:
+    """Accept either full gs:// URL or relative path (with default bucket fallback).
+
+    @phase R167-B8: relative path resolves bucket from FIREBASE_BUCKET env.
+    Backward compat: gs:// URLs work as before.
+    """
+    if location.startswith("gs://"):
+        return parse_gs_url(location)
+    default_bucket = get_settings().firebase_bucket
+    if not default_bucket:
+        raise ValueError(
+            f"Relative path '{location}' given but FIREBASE_BUCKET env not set"
+        )
+    return default_bucket, location.lstrip("/")
+
+
+def download_bytes(location: str) -> bytes:
+    """Download bytes from GCS. Accepts gs:// URL or relative path.
+
+    @phase R167-B8
+    """
+    bucket_name, blob_path = _resolve_bucket_and_path(location)
     bucket = _client().bucket(bucket_name)
     blob = bucket.blob(blob_path)
     buf = BytesIO()
     blob.download_to_file(buf)
     data = buf.getvalue()
-    logger.info("Downloaded %d bytes from %s", len(data), gs_url)
+    logger.info("Downloaded %d bytes from gs://%s/%s", len(data), bucket_name, blob_path)
     return data
 
 
