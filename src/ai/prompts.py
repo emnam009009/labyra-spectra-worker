@@ -1,4 +1,6 @@
-"""Hybrid EN+VI prompts per spectrum type. @phase R160-spectra-3c-hotfix3"""
+"""Hybrid EN+VI prompts per spectrum type.
+
+@phase R160-spectra-3c-hotfix3 + R165-phase-2-prompts (FTIR/Raman/UV-Vis grounding R165)."""
 
 from __future__ import annotations
 
