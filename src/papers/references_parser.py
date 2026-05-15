@@ -8,7 +8,7 @@ Strategy:
   3. Capture ±25 chars context per DOI
   4. Fall back to whole-document scan if section header missing
 
-DOI regex matches TS: \b10\.\d{4,9}/[-._;()/:a-zA-Z0-9]+
+DOI regex matches TS: \\b10\\.\\d{4,9}/[-._;()/:a-zA-Z0-9]*[a-zA-Z0-9] (R168-3.3a)
 
 @phase R167-B5a
 """
@@ -18,11 +18,11 @@ import re
 
 from src.papers.citation_types import ExtractedReference
 
-# Same DOI scan regex as TS (no anchors, scanning mode)
-_DOI_SCAN_RE = re.compile(r"\b10\.\d{4,9}/[-._;()/:a-zA-Z0-9]+")
+# DOI scan regex — strict shape mirrors TS (R168-3.3)
+_DOI_SCAN_RE = re.compile(r"\b10\.\d{4,9}/[-._;()/:a-zA-Z0-9]*[a-zA-Z0-9](?![.\d])")
 
-# Stricter validation regex (post-cleanup check)
-_DOI_VALIDATE_RE = re.compile(r"^10\.\d{4,9}/[-._;()/:a-zA-Z0-9]+$")
+# Validation regex — must end alphanum (R168-3.3)
+_DOI_VALIDATE_RE = re.compile(r"^10\.\d{4,9}/[-._;()/:a-zA-Z0-9]*[a-zA-Z0-9]$")
 
 # Section headers — case insensitive, line-anchored. Match TS regex exactly.
 _SECTION_HEADERS = [

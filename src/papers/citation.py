@@ -160,7 +160,7 @@ def run_citation_step(
                 target_journal=metadata.journal if metadata else None,
                 target_paper_id=internal_target,
                 metadata_source=metadata.source if metadata else "pdf-only",
-                confidence="doi-exact",
+                confidence="doi-exact" if metadata else "unverified",  # R168-3.3
                 context=ref.context,
             ))
             result.citations_created += 1

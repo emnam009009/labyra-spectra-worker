@@ -25,7 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 # ----------------------------------------------------------------------------
 # Enums — must match TS union types EXACTLY
 # ----------------------------------------------------------------------------
-CitationConfidence = Literal["doi-exact", "title-fuzzy", "manual"]
+CitationConfidence = Literal["doi-exact", "title-fuzzy", "unverified", "manual"]
 MetadataSource = Literal["crossref", "openalex", "pdf-only", "manual"]
 CitationType = Literal["primary", "review", "methods", "background", "unknown"]
 LifecycleStatus = Literal["active", "deprecated", "retracted"]
