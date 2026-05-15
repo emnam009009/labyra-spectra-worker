@@ -42,3 +42,8 @@ data/
 *.xy
 *.csv.bak
 spectra_samples/
+
+# Patch backup files (created by str_replace patches)
+*.bak
+*.bak[0-9]*
+*.bak[0-9]*-*
