@@ -34,6 +34,52 @@ METADATA_MAX_TOKENS = 500
 METADATA_INPUT_CHAR_LIMIT = 4000  # match TS slice(0, 4000)
 MIN_INPUT_CHARS = 50
 
+# R168-3.4: year sanity bounds + fallback regex
+# Valid publication year range. Lower=1800 (pre-modern but possible for historical refs);
+# upper=2100 (future-proof but rejects hallucinations like 99999, 2999).
+YEAR_MIN = 1800
+YEAR_MAX = 2100
+# Year-like pattern in OCR text: 1900-2039 (covers all realistic pubs).
+# Word-boundary anchored to avoid matching subscripts/indices.
+_YEAR_FALLBACK_RE = re.compile(r"\b(19\d{2}|20[0-3]\d)\b")
+
+
+def _coerce_year(value: Any, fallback_text: str) -> int:
+    """Defensive year coercion (R168-3.4).
+
+    Haiku occasionally returns string years "2024" or null/unknown despite
+    prompt specifying integer. Coerce flexibly, validate range, regex-fallback
+    from OCR text on miss.
+
+    Args:
+        value: parsed JSON year field (any type)
+        fallback_text: original OCR text for regex fallback
+
+    Returns:
+        int year in [YEAR_MIN, YEAR_MAX], or 0 if no valid extraction.
+    """
+    # Path 1: already valid int
+    if isinstance(value, int) and not isinstance(value, bool):
+        if YEAR_MIN <= value <= YEAR_MAX:
+            return value
+
+    # Path 2: string "2024" → int
+    if isinstance(value, str):
+        s = value.strip()
+        if s.isdigit() and len(s) == 4:
+            y = int(s)
+            if YEAR_MIN <= y <= YEAR_MAX:
+                return y
+
+    # Path 3: regex fallback from OCR text (first match wins)
+    if fallback_text:
+        m = _YEAR_FALLBACK_RE.search(fallback_text[:METADATA_INPUT_CHAR_LIMIT])
+        if m:
+            return int(m.group(1))
+
+    # Path 4: give up
+    return 0
+
 EXTRACT_PROMPT = """Extract bibliographic metadata from this scientific paper's first page.
 
 Return ONLY valid JSON with this exact shape, no markdown fences, no commentary:
@@ -70,7 +116,7 @@ def _strip_fences(text: str) -> str:
     return _MARKDOWN_FENCE_RE.sub("", text).strip()
 
 
-def _parse_metadata_json(raw_text: str) -> ExtractedMetadata:
+def _parse_metadata_json(raw_text: str, fallback_text: str = "") -> ExtractedMetadata:  # R168-3.4 added fallback_text
     """Parse LLM output to ExtractedMetadata, defaulting any invalid fields.
 
     Matches TS field-by-field defaulting (title default 'Untitled' only if
@@ -92,7 +138,7 @@ def _parse_metadata_json(raw_text: str) -> ExtractedMetadata:
         authors = []
 
     year_raw = parsed.get("year")
-    year = year_raw if isinstance(year_raw, int) else 0
+    year = _coerce_year(year_raw, raw_text)  # R168-3.4 defensive cast + fallback
 
     doi_raw = parsed.get("doi")
     doi = doi_raw if isinstance(doi_raw, str) else ""
@@ -133,7 +179,7 @@ def extract_metadata(first_page_text: str) -> ExtractedMetadata:
         text_blocks = [b.text for b in response.content if hasattr(b, "text")]
         raw_text = "".join(text_blocks)
 
-        return _parse_metadata_json(raw_text)
+        return _parse_metadata_json(raw_text, fallback_text=first_page_text)  # R168-3.4
 
     except Exception as exc:  # noqa: BLE001 — best-effort, never raise
         logger.warning("metadata_extract_failed err=%s", exc)
