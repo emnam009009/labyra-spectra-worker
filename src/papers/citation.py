@@ -97,6 +97,13 @@ def run_citation_step(
     )
 
     if not refs:
+        # R168-3.6: still create _stats doc with count=0 for UI queries
+        try:
+            recompute_citation_stats(db, tenant_id, paper_id)
+        except Exception as exc:  # noqa: BLE001 — non-blocking, best-effort
+            logger.warning(
+                "stats_recompute_failed_empty paper=%s err=%s", paper_id, exc
+            )
         return result
 
     # 2. Pre-fetch existing citations for dedup
