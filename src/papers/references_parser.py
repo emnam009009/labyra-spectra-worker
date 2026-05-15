@@ -18,8 +18,8 @@ import re
 
 from src.papers.citation_types import ExtractedReference
 
-# DOI scan regex — strict shape mirrors TS (R168-3.3)
-_DOI_SCAN_RE = re.compile(r"\b10\.\d{4,9}/[-._;()/:a-zA-Z0-9]*[a-zA-Z0-9](?![.\d])")
+# R168-3.3g: suffix ≥3 chars rule
+_DOI_SCAN_RE = re.compile(r"\b10\.\d{4,9}/[-_;()/:a-zA-Z0-9]+(?:\.[a-zA-Z0-9]{3,})*\b(?![./])")
 
 # Validation regex — must end alphanum (R168-3.3)
 _DOI_VALIDATE_RE = re.compile(r"^10\.\d{4,9}/[-._;()/:a-zA-Z0-9]*[a-zA-Z0-9]$")
