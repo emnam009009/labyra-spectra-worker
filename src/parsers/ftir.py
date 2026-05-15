@@ -97,6 +97,13 @@ def _to_absorbance(y: np.ndarray, mode: str) -> np.ndarray:
 
 
 def _detect_peaks(x: np.ndarray, y_abs: np.ndarray, *, max_peaks: int = 30) -> list[dict[str, float]]:
+    # R165-phase-3-ftir-fwhm: PerkinElmer ASC files have descending x (4000 → 400 cm⁻¹).
+    # find_peaks expects monotonic-positive-step data; reverse if descending so
+    # dx > 0 and FWHM stays positive. y_abs reindexed to match.
+    if len(x) > 1 and x[1] < x[0]:
+        x = x[::-1].copy()
+        y_abs = y_abs[::-1].copy()
+
     if len(y_abs) >= 21:
         y_smooth = savgol_filter(y_abs, window_length=11, polyorder=3)
     else:
@@ -110,7 +117,8 @@ def _detect_peaks(x: np.ndarray, y_abs: np.ndarray, *, max_peaks: int = 30) -> l
     peaks = []
     widths = props.get("widths", np.zeros(len(peak_idx)))
     for i, idx in enumerate(peak_idx):
-        dx = float(x[1] - x[0]) if len(x) > 1 else 0.0
+        # R165-phase-3-ftir-fwhm: abs() — defense even though we now sort ascending above
+        dx = abs(float(x[1] - x[0])) if len(x) > 1 else 0.0
         peaks.append({
             "wavenumber_cm1": float(round(x[idx], 1)),
             "absorbance": float(round(y_smooth[idx], 4)),
