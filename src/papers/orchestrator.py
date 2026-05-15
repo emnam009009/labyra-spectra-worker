@@ -1,0 +1,254 @@
+"""Paper processing pipeline orchestrator.
+
+Port labyra-app/src/lib/ai/rag/pipeline/orchestrator.ts.
+
+Single entry point: process_paper(). Runs full pipeline OCR → chunk →
+[enrich] → embed → index → citation, with state machine updates and
+cost accounting per step.
+
+@phase R167-B6
+"""
+from __future__ import annotations
+
+import logging
+import time
+from typing import Any
+
+from google.cloud import firestore  # type: ignore[import-untyped]
+from google.cloud.firestore_v1 import SERVER_TIMESTAMP  # type: ignore[import-untyped]
+
+from src.papers.chunking import chunk_paper
+from src.papers.citation import run_citation_step
+from src.papers.embed import run_embed_step
+from src.papers.enrich import run_enrich_step
+from src.papers.errors import CancelledError, FatalError, RetryableError
+from src.papers.index import run_index_step
+from src.papers.metadata import extract_metadata
+from src.papers.ocr import run_ocr_step
+from src.papers.state import (
+    check_cancelled,
+    load_paper,
+    set_cancelled,
+    set_error,
+    update_status,
+)
+from src.papers.types import PaperDoc
+
+logger = logging.getLogger(__name__)
+
+# Fatal error patterns — match TS isFatalError
+_FATAL_ERROR_PATTERNS = (
+    "unauthorized",
+    "quota_exceeded",
+    "invalid_pdf",
+    "malformed",
+)
+
+
+def _is_fatal_error_message(msg: str) -> bool:
+    """Check if an error message indicates a permanent (non-retryable) failure."""
+    lower = msg.lower()
+    return any(p in lower for p in _FATAL_ERROR_PATTERNS)
+
+
+def _log_event(event: str, **fields: Any) -> None:
+    """Structured JSON-friendly log via standard logger (Cloud Logging auto-indexes)."""
+    logger.info("%s %s", event, " ".join(f"{k}={v}" for k, v in fields.items()))
+
+
+def process_paper(
+    db: firestore.Client,
+    tenant_id: str,
+    paper_id: str,
+    storage_path: str,
+    job_id: str,
+    created_by: str,
+) -> None:
+    """Run full paper processing pipeline.
+
+    Idempotency contract (Pub/Sub at-least-once delivery):
+      - Paper already 'indexed' → return early (no work)
+      - Paper 'cancelling'/'cancelled' → set_cancelled() + return
+      - Each step itself idempotent (Firestore .set overwrites, Pinecone
+        upsert overwrites by ID, createCitation dedup by deterministic ID)
+
+    Args:
+        db: Firestore client
+        tenant_id, paper_id: identity
+        storage_path: GCS path to PDF (from Pub/Sub message)
+        job_id: unique job ID for trace correlation
+        created_by: UID of user who triggered (for ProvBase on citations)
+
+    Raises:
+        CancelledError: user cancelled — handler should 204 ack
+        FatalError: permanent failure — handler should 400 ack
+        RetryableError: transient failure — handler should 500 (Pub/Sub retry)
+    """
+    started_at = time.monotonic()
+    _log_event("pipeline_start", tenant=tenant_id, paper=paper_id, job=job_id)
+
+    # ── Load paper + idempotency check ──────────────────────
+    try:
+        paper = load_paper(db, tenant_id, paper_id)
+    except FatalError:
+        raise  # paper not found = no point retrying
+    except Exception as exc:
+        raise RetryableError(f"load_paper failed: {exc}") from exc
+
+    # Already indexed (Pub/Sub duplicate delivery after success)
+    if paper.status == "indexed":
+        _log_event("pipeline_skip_already_indexed", paper=paper_id)
+        return
+
+    # User-initiated cancellation already recorded
+    if paper.status in ("cancelling", "cancelled"):
+        _log_event("pipeline_already_cancelled", paper=paper_id)
+        set_cancelled(db, tenant_id, paper_id)
+        return
+
+    # Mark processing start (replaces any previous attempt timestamp)
+    db.document(f"tenants/{tenant_id}/papers/{paper_id}").update({
+        "processingStartedAt": SERVER_TIMESTAMP,
+    })
+
+    try:
+        # ── STEP 1: OCR ─────────────────────────────────────
+        _log_event("step_ocr_start", paper=paper_id)
+        ocr_result = run_ocr_step(db, tenant_id, paper_id, storage_path)
+        _log_event(
+            "step_ocr_done",
+            paper=paper_id, pages=ocr_result.page_count, cost_usd=ocr_result.cost_usd,
+        )
+
+        # ── STEP 1b: Metadata extract (best-effort, non-blocking) ──
+        # Mirrors TS hotfix-5d-4 — extract real title/year/DOI from page 1
+        first_page_text = ocr_result.pages[0].text if ocr_result.pages else ""
+        try:
+            meta = extract_metadata(first_page_text)
+            db.document(f"tenants/{tenant_id}/papers/{paper_id}").update({
+                "title": meta.title,
+                "authors": meta.authors,
+                "year": meta.year,
+                "doi": meta.doi,
+                "metadataExtractedAt": SERVER_TIMESTAMP,
+            })
+            # Update local paper for downstream index step (uses real metadata)
+            paper = PaperDoc.model_validate({
+                **paper.model_dump(by_alias=True),
+                "title": meta.title,
+                "authors": meta.authors,
+                "year": meta.year,
+                "doi": meta.doi,
+            })
+            _log_event(
+                "metadata_extracted",
+                paper=paper_id, title_chars=len(meta.title), authors=len(meta.authors),
+            )
+        except Exception as exc:  # noqa: BLE001 — non-fatal
+            _log_event("metadata_extract_skipped", paper=paper_id, error=str(exc)[:100])
+
+        # ── STEP 2: Chunking ────────────────────────────────
+        update_status(db, tenant_id, paper_id, "chunking")
+        _log_event("step_chunking_start", paper=paper_id)
+        chunks = chunk_paper(ocr_result)
+        db.document(f"tenants/{tenant_id}/papers/{paper_id}").update({
+            "chunkCount": len(chunks),
+        })
+        _log_event("step_chunking_done", paper=paper_id, chunks=len(chunks))
+
+        if not chunks:
+            raise FatalError("no chunks extracted — empty or malformed OCR output")
+
+        # ── STEP 3: Contextual enrichment (default OFF) ─────
+        update_status(db, tenant_id, paper_id, "enriching")
+        _log_event("step_enriching_start", paper=paper_id)
+        enriched = run_enrich_step(db, tenant_id, paper_id, ocr_result.full_text, chunks)
+        db.document(f"tenants/{tenant_id}/papers/{paper_id}").update({
+            "enrichedChunkCount": len(enriched),
+        })
+        _log_event("step_enriching_done", paper=paper_id, enriched=len(enriched))
+
+        # ── STEP 4: Embedding ───────────────────────────────
+        update_status(db, tenant_id, paper_id, "embedding")
+        _log_event("step_embedding_start", paper=paper_id)
+        embedded = run_embed_step(db, tenant_id, paper_id, enriched)
+        db.document(f"tenants/{tenant_id}/papers/{paper_id}").update({
+            "embeddedChunkCount": len(embedded),
+        })
+        _log_event("step_embedding_done", paper=paper_id, embedded=len(embedded))
+
+        # ── STEP 5: Indexing ────────────────────────────────
+        update_status(db, tenant_id, paper_id, "indexing")
+        _log_event("step_indexing_start", paper=paper_id)
+        indexed_count = run_index_step(db, tenant_id, paper, embedded)
+        db.document(f"tenants/{tenant_id}/papers/{paper_id}").update({
+            "indexedChunkCount": indexed_count,
+        })
+        _log_event("step_indexing_done", paper=paper_id, indexed=indexed_count)
+
+        # ── STEP 6: Citation extraction (non-blocking) ──────
+        # Per ADR-017: citation extraction is enhancement, not blocker. Paper
+        # is still searchable via vector embeddings even if citation fails.
+        try:
+            update_status(db, tenant_id, paper_id, "extracting_citations")
+            _log_event("step_citation_start", paper=paper_id)
+            citation_result = run_citation_step(
+                db, tenant_id, paper_id,
+                created_by=created_by or paper.created_by,
+                full_text=ocr_result.full_text,
+            )
+            _log_event(
+                "step_citation_done",
+                paper=paper_id,
+                dois_found=citation_result.dois_found,
+                citations_created=citation_result.citations_created,
+                resolutions_linked=citation_result.resolutions_linked,
+                api_failures=citation_result.api_failures,
+            )
+        except CancelledError:
+            raise  # cancellation always propagates
+        except Exception as exc:  # noqa: BLE001 — citation non-fatal
+            _log_event(
+                "step_citation_failed", paper=paper_id, error=str(exc)[:200],
+            )
+
+        # ── DONE ────────────────────────────────────────────
+        total_latency_ms = int((time.monotonic() - started_at) * 1000)
+        update_status(db, tenant_id, paper_id, "indexed", extra_fields={
+            "processingCompletedAt": SERVER_TIMESTAMP,
+            "totalLatencyMs": total_latency_ms,
+        })
+        _log_event("pipeline_complete", paper=paper_id, latency_ms=total_latency_ms)
+
+    except CancelledError:
+        _log_event("pipeline_cancelled", paper=paper_id)
+        set_cancelled(db, tenant_id, paper_id)
+        raise
+
+    except FatalError as exc:
+        msg = str(exc)
+        _log_event("pipeline_fatal_error", paper=paper_id, error=msg[:200])
+        set_error(db, tenant_id, paper_id, msg, is_retryable=False)
+        raise
+
+    except RetryableError as exc:
+        msg = str(exc)
+        # Check if the underlying error is actually fatal by message pattern
+        if _is_fatal_error_message(msg):
+            _log_event("pipeline_fatal_pattern", paper=paper_id, error=msg[:200])
+            set_error(db, tenant_id, paper_id, msg, is_retryable=False)
+            raise FatalError(msg) from exc
+        _log_event("pipeline_retryable_error", paper=paper_id, error=msg[:200])
+        set_error(db, tenant_id, paper_id, msg, is_retryable=True)
+        raise
+
+    except Exception as exc:  # noqa: BLE001 — final catch-all
+        msg = str(exc) or exc.__class__.__name__
+        if _is_fatal_error_message(msg):
+            _log_event("pipeline_unexpected_fatal", paper=paper_id, error=msg[:200])
+            set_error(db, tenant_id, paper_id, msg, is_retryable=False)
+            raise FatalError(msg) from exc
+        _log_event("pipeline_unexpected_error", paper=paper_id, error=msg[:200])
+        set_error(db, tenant_id, paper_id, msg, is_retryable=True)
+        # Re-raise as RetryableError so Pub/Sub retries (handler returns 500)
+        raise RetryableError(msg) from exc
