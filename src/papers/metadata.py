@@ -138,7 +138,7 @@ def _parse_metadata_json(raw_text: str, fallback_text: str = "") -> ExtractedMet
         authors = []
 
     year_raw = parsed.get("year")
-    year = _coerce_year(year_raw, raw_text)  # R168-3.4 defensive cast + fallback
+    year = _coerce_year(year_raw, fallback_text or raw_text)  # R176-1a-year-fallback-fix
 
     doi_raw = parsed.get("doi")
     doi = doi_raw if isinstance(doi_raw, str) else ""
