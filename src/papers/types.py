@@ -16,7 +16,8 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from datetime import datetime
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # ----------------------------------------------------------------------------
 # PaperStatus — must match labyra-app/src/types/papers.ts exactly
@@ -44,6 +45,36 @@ CANCELLABLE_STATUSES: frozenset[PaperStatus] = frozenset(
 # ----------------------------------------------------------------------------
 # Pub/Sub envelope (ADR-018 message shape)
 # ----------------------------------------------------------------------------
+
+
+
+# ----------------------------------------------------------------------------
+# Timestamp coercion validators (R176-1c-1)
+# ----------------------------------------------------------------------------
+# See state.py parse_epoch_ms() docstring for full rationale.
+# Pydantic v2 field_validator with mode='before' runs BEFORE type coercion,
+# allowing us to coerce Firestore Timestamp objects → int epoch ms.
+# R176-1c-1-timestamp-defensive
+
+
+def _coerce_timestamp_to_epoch_ms(v: object) -> int:
+    """Pydantic before-validator: Firestore timestamp → int epoch ms."""
+    if v is None or v == 0 or v == "":
+        return 0
+    if isinstance(v, bool):
+        return 0
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        return int(v)
+    if isinstance(v, datetime):
+        return int(v.timestamp() * 1000)
+    if isinstance(v, str):
+        s = v.strip()
+        if s.isdigit():
+            return int(s)
+    # Unknown — return 0 (validator never raises, defensive)
+    return 0
 
 
 class PaperJob(BaseModel):
@@ -124,6 +155,12 @@ class PaperDoc(BaseModel):
 # Pipeline data types (Pydantic for I/O boundaries; pure dataclasses OK
 # for in-process passing but Pydantic simpler — same import path)
 # ----------------------------------------------------------------------------
+
+    @field_validator("cancel_requested_at", mode='before')
+    @classmethod
+    def _coerce_paperdoc_timestamps(cls, v: object) -> int:
+        # R176-1c-1-timestamp-defensive
+        return _coerce_timestamp_to_epoch_ms(v)
 
 
 class OcrPage(BaseModel):
