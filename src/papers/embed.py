@@ -35,7 +35,7 @@ VOYAGE_EMBED_DIM = 1024
 #   - 32K tokens per single document
 # We use 100K token budget (16% safety) + 128 doc cap (proven throughput).
 # # R176-1d-token-aware-batching
-VOYAGE_MAX_TOKENS_PER_BATCH = 100_000
+VOYAGE_MAX_TOKENS_PER_BATCH = 70_000  # R176-1d-hotfix-safety-margin
 VOYAGE_MAX_DOCS_PER_BATCH = 128
 # Legacy alias kept for backward compat with logs
 EMBED_BATCH_SIZE = VOYAGE_MAX_DOCS_PER_BATCH
