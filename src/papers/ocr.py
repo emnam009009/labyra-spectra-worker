@@ -47,7 +47,9 @@ def _mistral_client() -> Mistral:
     settings = get_settings()
     if not settings.mistral_api_key:
         raise FatalError("MISTRAL_API_KEY missing in worker settings")
-    return Mistral(api_key=settings.mistral_api_key)
+    # # R176-1e-mistral-timeout
+    # 10-min timeout for large PDFs (~2000 pages at ~3 pages/sec)
+    return Mistral(api_key=settings.mistral_api_key, timeout_ms=600_000)
 
 
 def run_ocr_step(
