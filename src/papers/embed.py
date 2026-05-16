@@ -29,7 +29,16 @@ logger = logging.getLogger(__name__)
 VOYAGE_API_BASE = "https://api.voyageai.com/v1"
 VOYAGE_EMBED_MODEL = "voyage-3-large"
 VOYAGE_EMBED_DIM = 1024
-EMBED_BATCH_SIZE = 128
+# Voyage voyage-3-large limits (docs.voyageai.com/docs/embeddings):
+#   - 120,000 tokens per request
+#   - 1,000 documents per request
+#   - 32K tokens per single document
+# We use 100K token budget (16% safety) + 128 doc cap (proven throughput).
+# # R176-1d-token-aware-batching
+VOYAGE_MAX_TOKENS_PER_BATCH = 100_000
+VOYAGE_MAX_DOCS_PER_BATCH = 128
+# Legacy alias kept for backward compat with logs
+EMBED_BATCH_SIZE = VOYAGE_MAX_DOCS_PER_BATCH
 HTTP_TIMEOUT_SECONDS = 60.0
 
 
@@ -95,6 +104,58 @@ def _voyage_embed_batch(texts: list[str]) -> tuple[list[list[float]], int]:
     return embeddings, total_tokens
 
 
+def _chunk_tokens(c: Chunk) -> int:
+    """Estimate tokens for a chunk. Use chunk.tokens if populated, else 1024 default.
+
+    Chunking step (chunking.py) targets ~1024 tokens/chunk; fallback covers
+    rare case where field not set.
+    # R176-1d-token-aware-batching
+    """
+    t = getattr(c, "tokens", None)
+    if isinstance(t, int) and t > 0:
+        return t
+    return 1024
+
+
+def _pack_batches(chunks: list[Chunk]) -> list[list[Chunk]]:
+    """Greedy pack chunks into batches respecting Voyage 120K tokens + 1000 docs limits.
+
+    Strategy: iterate chunks, accumulate to current batch until adding next chunk
+    would exceed EITHER VOYAGE_MAX_TOKENS_PER_BATCH OR VOYAGE_MAX_DOCS_PER_BATCH.
+    Then flush current batch and start new one.
+
+    A single chunk exceeding VOYAGE_MAX_TOKENS_PER_BATCH is FatalError because
+    Voyage will reject single document > 120K (also chunking should never produce
+    such large chunks — default ~1024 tokens).
+    # R176-1d-token-aware-batching
+    """
+    if not chunks:
+        return []
+    batches: list[list[Chunk]] = []
+    current: list[Chunk] = []
+    current_tokens = 0
+    for c in chunks:
+        ct = _chunk_tokens(c)
+        if ct > VOYAGE_MAX_TOKENS_PER_BATCH:
+            raise FatalError(
+                f"chunk_too_large: tokens={ct} exceeds voyage-3-large per-batch cap "
+                f"{VOYAGE_MAX_TOKENS_PER_BATCH}. Chunking step bug."
+            )
+        # Would adding this chunk overflow current batch?
+        if current and (
+            current_tokens + ct > VOYAGE_MAX_TOKENS_PER_BATCH
+            or len(current) >= VOYAGE_MAX_DOCS_PER_BATCH
+        ):
+            batches.append(current)
+            current = []
+            current_tokens = 0
+        current.append(c)
+        current_tokens += ct
+    if current:
+        batches.append(current)
+    return batches
+
+
 def run_embed_step(
     db: firestore.Client,
     tenant_id: str,
@@ -122,12 +183,20 @@ def run_embed_step(
 
     embedded: list[EmbeddedChunk] = []
 
-    for batch_start in range(0, len(chunks), EMBED_BATCH_SIZE):
+    # # R176-1d-token-aware-batching
+    # Greedy pack chunks into batches respecting BOTH caps.
+    batches = _pack_batches(chunks)
+    logger.info(
+        "embed_packing tenant=%s paper=%s total_chunks=%d num_batches=%d",
+        tenant_id, paper_id, len(chunks), len(batches),
+    )
+
+    for batch_idx, batch in enumerate(batches):
         check_cancelled(db, tenant_id, paper_id)
 
-        batch = chunks[batch_start:batch_start + EMBED_BATCH_SIZE]
         # Use contextual_text if available (B4 enrich step), else raw text
         texts = [c.contextual_text or c.text for c in batch]
+        estimated_tokens = sum(_chunk_tokens(c) for c in batch)
 
         embeddings, total_tokens = _voyage_embed_batch(texts)
 
@@ -155,9 +224,10 @@ def run_embed_step(
         increment_cost(db, tenant_id, paper_id, "embedding", cost)
 
         logger.info(
-            "embed_batch_done tenant=%s paper=%s batch=%d size=%d tokens=%d cost=%.6f",
-            tenant_id, paper_id, batch_start // EMBED_BATCH_SIZE, len(batch),
-            total_tokens, cost,
+            "embed_batch_done tenant=%s paper=%s batch=%d/%d size=%d "
+            "est_tokens=%d actual_tokens=%d cost=%.6f",
+            tenant_id, paper_id, batch_idx + 1, len(batches), len(batch),
+            estimated_tokens, total_tokens, cost,
         )
 
     logger.info(
