@@ -23,6 +23,7 @@ from src.papers.embed import run_embed_step
 from src.papers.enrich import run_enrich_step
 from src.papers.errors import CancelledError, FatalError, RetryableError
 from src.papers.index import run_index_step
+from src.papers.google_books import lookup_book_isbn, search_book_by_title
 from src.papers.metadata import extract_metadata
 from src.papers.ocr import run_ocr_step
 from src.papers.state import (
@@ -122,16 +123,21 @@ def process_paper(
 
         # ── STEP 1b: Metadata extract (best-effort, non-blocking) ──
         # Mirrors TS hotfix-5d-4 — extract real title/year/DOI from page 1
+        # R177-1d: also detects documentType + isbn + publisher (for books)
         first_page_text = ocr_result.pages[0].text if ocr_result.pages else ""
         try:
             meta = extract_metadata(first_page_text)
-            db.document(f"tenants/{tenant_id}/papers/{paper_id}").update({
+            update_payload = {
                 "title": meta.title,
                 "authors": meta.authors,
                 "year": meta.year,
                 "doi": meta.doi,
+                "documentType": meta.document_type,
+                "isbn": meta.isbn,
+                "publisher": meta.publisher,
                 "metadataExtractedAt": SERVER_TIMESTAMP,
-            })
+            }
+            db.document(f"tenants/{tenant_id}/papers/{paper_id}").update(update_payload)
             # Update local paper for downstream index step (uses real metadata)
             paper = PaperDoc.model_validate({
                 **paper.model_dump(by_alias=True),
@@ -139,13 +145,69 @@ def process_paper(
                 "authors": meta.authors,
                 "year": meta.year,
                 "doi": meta.doi,
+                "documentType": meta.document_type,
+                "isbn": meta.isbn,
+                "publisher": meta.publisher,
             })
             _log_event(
                 "metadata_extracted",
-                paper=paper_id, title_chars=len(meta.title), authors=len(meta.authors),
+                paper=paper_id,
+                title_chars=len(meta.title),
+                authors=len(meta.authors),
+                document_type=meta.document_type,
             )
         except Exception as exc:  # noqa: BLE001 — non-fatal
             _log_event("metadata_extract_skipped", paper=paper_id, error=str(exc)[:100])
+            meta = None  # used by Step 1c
+
+        # ── STEP 1c: Book metadata resolve (R177-1d, best-effort) ──
+        # If documentType=book, query Google Books for canonical title/year/
+        # publisher/page_count. Crossref+OpenAlex don\'t index books.
+        # Skipped silently when documentType != "book" or Step 1b failed.
+        if meta and meta.document_type == "book":
+            try:
+                book = None
+                # Path 1: ISBN exact (highest confidence)
+                if meta.isbn:
+                    book = lookup_book_isbn(meta.isbn)
+                # Path 2: title fuzzy fallback (Jaccard ≥ 0.8 inside resolver)
+                if book is None and meta.title and meta.title != "Untitled":
+                    book = search_book_by_title(meta.title, meta.authors or None)
+
+                if book is not None:
+                    # Merge canonical fields from Google Books, prefer
+                    # API values over OCR-extracted (more reliable).
+                    book_update = {
+                        "title": book.title or meta.title,
+                        "year": book.year or meta.year,
+                        "publisher": book.publisher or meta.publisher,
+                        "isbn": book.isbn_13 or book.isbn_10 or meta.isbn,
+                        "bookPageCount": book.page_count,
+                        "bookSubtitle": book.subtitle,
+                        "bookSourceId": book.source_id,
+                        "bookResolvedAt": SERVER_TIMESTAMP,
+                    }
+                    db.document(f"tenants/{tenant_id}/papers/{paper_id}").update(book_update)
+                    _log_event(
+                        "book_metadata_resolved",
+                        paper=paper_id,
+                        source_id=book.source_id,
+                        publisher=book.publisher[:40],
+                        year=book.year,
+                    )
+                else:
+                    _log_event(
+                        "book_metadata_unresolved",
+                        paper=paper_id,
+                        had_isbn=bool(meta.isbn),
+                        title=meta.title[:60],
+                    )
+            except Exception as exc:  # noqa: BLE001 — non-fatal
+                _log_event(
+                    "book_metadata_skipped",
+                    paper=paper_id,
+                    error=str(exc)[:100],
+                )
 
         # ── STEP 2: Chunking ────────────────────────────────
         update_status(db, tenant_id, paper_id, "chunking")

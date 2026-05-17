@@ -69,20 +69,35 @@ def _coerce_year(value: Any, fallback_text: str) -> int:
     return 0
 
 
-EXTRACT_PROMPT = """Extract bibliographic metadata from this scientific paper\'s first page.
+EXTRACT_PROMPT = """Extract bibliographic metadata from this document\'s first page.
 
 Rules:
-- title: Full proper title from the article header, NOT the filename. Capitalize properly.
+- title: Full proper title from the document header, NOT the filename. Capitalize properly.
 - authors: list of "First Last" strings. Use et al. only if >5 authors and shorten.
 - year: publication year as integer, e.g. 2024. Use 0 if not visible.
-- doi: standardize as "10.xxxx/yyyy" without https:// prefix.
-- If any field truly cannot be extracted, use defaults: title="Untitled", authors=[], year=0, doi=\"\"."""
+- doi: standardize as "10.xxxx/yyyy" without https:// prefix. Empty if not found.
+- documentType: classify the document type:
+  * "article" if: journal name visible, DOI in header, volume/issue numbers,
+    abstract section, "Received/Accepted" dates, conference proceedings
+  * "book" if: ISBN visible, "Edition" keyword, publisher name on cover,
+    chapter headings (Chapter 1, Chapter 2...), no journal/DOI markers,
+    table of contents on early pages
+  * "thesis" if: "Thesis", "Dissertation", "PhD", "MSc", "Master\'s",
+    university name + degree program, "Submitted to", "Supervisor:"
+  * "unknown" if uncertain — DEFAULT when no strong signal
+- isbn: ISBN-10 or ISBN-13 if visible (book/thesis). Empty for article.
+- publisher: publisher name if visible (book/thesis). Empty for article.
+- If any field truly cannot be extracted, use defaults: title="Untitled",
+  authors=[], year=0, doi="", documentType="unknown", isbn="", publisher=\"\"."""
 
 
 class ExtractedMetadata(BaseModel):
     """Bibliographic metadata extracted from first page.
 
     Gemini SDK uses this Pydantic model\'s JSON schema to constrain output.
+
+    R177-1d: extended with documentType + book fields (isbn, publisher) for
+    routing in orchestrator (article→Crossref, book→Google Books).
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -91,6 +106,14 @@ class ExtractedMetadata(BaseModel):
     authors: list[str] = Field(default_factory=list, description="Author names as First Last")
     year: int = Field(default=0, description="4-digit publication year, 0 if unknown")
     doi: str = Field(default="", description="DOI like 10.xxxx/yyyy without https://")
+    # R177-1d-document-type
+    document_type: str = Field(
+        default="unknown",
+        description="Document classification: 'article' | 'book' | 'thesis' | 'unknown'",
+        alias="documentType",
+    )
+    isbn: str = Field(default="", description="ISBN-10 or ISBN-13 (book/thesis only)")
+    publisher: str = Field(default="", description="Publisher name (book/thesis only)")
 
 
 def extract_metadata(first_page_text: str) -> ExtractedMetadata:

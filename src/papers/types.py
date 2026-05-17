@@ -22,6 +22,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 # ----------------------------------------------------------------------------
 # PaperStatus — must match labyra-app/src/types/papers.ts exactly
 # ----------------------------------------------------------------------------
+# R177-1d: documentType for routing metadata resolution
+# (article → Crossref+OpenAlex DOI lookup; book → Google Books ISBN/title)
+DocumentType = Literal["article", "book", "thesis", "unknown"]
+
+
 PaperStatus = Literal[
     "queued",
     "ocr",
@@ -146,6 +151,14 @@ class PaperDoc(BaseModel):
     authors: list[str] = Field(default_factory=list)
     year: int = 0
     doi: str = ""
+
+    # R177-1d: book/non-article document type support
+    # documentType detected by metadata.py Gemini extract; routes resolution
+    # path in orchestrator (article=Crossref+OpenAlex, book=Google Books).
+    # Default "unknown" preserves backward-compat for legacy papers.
+    document_type: DocumentType = Field(alias="documentType", default="unknown")
+    isbn: str = ""
+    publisher: str = ""
 
     # Created context (for citation step needs createdBy per R166 ai-6)
     created_by: str = Field(alias="createdBy", default="")
