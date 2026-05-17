@@ -47,3 +47,8 @@ spectra_samples/
 *.bak
 *.bak[0-9]*
 *.bak[0-9]*-*
+
+# Backup files (R177 cleanup — prevent .bak* pollution)
+*.bak
+*.bak[0-9]*
+*.bak.*
