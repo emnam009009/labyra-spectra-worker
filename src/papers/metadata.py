@@ -1,68 +1,57 @@
-"""Extract paper metadata (title, authors, year, DOI) from OCR'd first page.
+"""Extract paper metadata (title, authors, year, DOI) from OCR\'d first page.
 
-Port labyra-app/src/lib/ai/rag/pipeline/metadata-extract.ts.
+R177-1b: migrated from Anthropic Haiku 4.5 → Gemini 3 Flash.
+  Reasoning: structured JSON output, no caching benefit (single-shot per
+  paper), Gemini cheaper at $0.50/$3 vs Haiku $1/$5.
+  Cost: ~$0.0026/paper vs Haiku ~$0.005/paper (~50% reduction).
 
-Uses Haiku 4.5 (~$0.001/paper). NO prompt caching — single-shot call per
-paper, cache write overhead not worth it.
+Pydantic schema (ExtractedMetadata) drives Gemini structured output —
+SDK constrains generation to match schema, eliminating most JSON parse
+errors vs the old prompt-based approach.
 
-Returns defaults (title='Untitled', authors=[], year=0, doi='') on:
+Returns defaults (title=\'Untitled\', authors=[], year=0, doi=\'\') on:
   - Empty/too-short input (<50 chars)
   - LLM call failure
-  - JSON parse failure
+  - JSON parse failure (defensive — SDK should prevent)
+  - Schema validation failure
 
-This is best-effort metadata — citation step + downstream search still work
-with defaults.
+This is best-effort metadata — citation step + downstream search still
+work with defaults.
 
-@phase R167-B4
+@phase R167-B4 → R176-1a (year fallback) → R177-1b (Gemini migration)
 """
 from __future__ import annotations
 
-import json
 import logging
 import re
 from typing import Any
 
-from anthropic import Anthropic
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.papers.enrich import _anthropic_client  # reuse singleton
+from src.config import get_settings
+from src.papers._gemini_client import extract_json
 
 logger = logging.getLogger(__name__)
 
-METADATA_MODEL = "claude-haiku-4-5-20251001"
-METADATA_MAX_TOKENS = 500
 METADATA_INPUT_CHAR_LIMIT = 4000  # match TS slice(0, 4000)
 MIN_INPUT_CHARS = 50
 
 # R168-3.4: year sanity bounds + fallback regex
-# Valid publication year range. Lower=1800 (pre-modern but possible for historical refs);
-# upper=2100 (future-proof but rejects hallucinations like 99999, 2999).
 YEAR_MIN = 1800
 YEAR_MAX = 2100
-# Year-like pattern in OCR text: 1900-2039 (covers all realistic pubs).
-# Word-boundary anchored to avoid matching subscripts/indices.
 _YEAR_FALLBACK_RE = re.compile(r"\b(19\d{2}|20[0-3]\d)\b")
 
 
 def _coerce_year(value: Any, fallback_text: str) -> int:
     """Defensive year coercion (R168-3.4).
 
-    Haiku occasionally returns string years "2024" or null/unknown despite
-    prompt specifying integer. Coerce flexibly, validate range, regex-fallback
-    from OCR text on miss.
-
-    Args:
-        value: parsed JSON year field (any type)
-        fallback_text: original OCR text for regex fallback
-
-    Returns:
-        int year in [YEAR_MIN, YEAR_MAX], or 0 if no valid extraction.
+    Gemini structured output usually returns proper int, but defensive
+    coercion stays for backward-compat + regex fallback when extract miss.
     """
     # Path 1: already valid int
     if isinstance(value, int) and not isinstance(value, bool):
         if YEAR_MIN <= value <= YEAR_MAX:
             return value
-
     # Path 2: string "2024" → int
     if isinstance(value, str):
         s = value.strip()
@@ -70,84 +59,42 @@ def _coerce_year(value: Any, fallback_text: str) -> int:
             y = int(s)
             if YEAR_MIN <= y <= YEAR_MAX:
                 return y
-
     # Path 3: regex fallback from OCR text (first match wins)
+    # R176-1a-year-fallback-fix: use fallback_text (full OCR) not raw_text (LLM output)
     if fallback_text:
         m = _YEAR_FALLBACK_RE.search(fallback_text[:METADATA_INPUT_CHAR_LIMIT])
         if m:
             return int(m.group(1))
-
     # Path 4: give up
     return 0
 
-EXTRACT_PROMPT = """Extract bibliographic metadata from this scientific paper's first page.
 
-Return ONLY valid JSON with this exact shape, no markdown fences, no commentary:
-{
-  "title": "<full paper title, NO filename slugs>",
-  "authors": ["<First Last>", "..."],
-  "year": <4-digit year as number, 0 if unknown>,
-  "doi": "<DOI like 10.1021/acsami.xxxx, empty string if not found>"
-}
+EXTRACT_PROMPT = """Extract bibliographic metadata from this scientific paper\'s first page.
 
 Rules:
 - title: Full proper title from the article header, NOT the filename. Capitalize properly.
 - authors: list of "First Last" strings. Use et al. only if >5 authors and shorten.
 - year: publication year as integer, e.g. 2024. Use 0 if not visible.
 - doi: standardize as "10.xxxx/yyyy" without https:// prefix.
-- If any field truly cannot be extracted, use defaults: title="Untitled", authors=[], year=0, doi=""."""
-
-_MARKDOWN_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```\s*$", re.IGNORECASE | re.MULTILINE)
+- If any field truly cannot be extracted, use defaults: title="Untitled", authors=[], year=0, doi=\"\"."""
 
 
 class ExtractedMetadata(BaseModel):
-    """Bibliographic metadata extracted from first page."""
+    """Bibliographic metadata extracted from first page.
+
+    Gemini SDK uses this Pydantic model\'s JSON schema to constrain output.
+    """
 
     model_config = ConfigDict(extra="ignore")
 
-    title: str = "Untitled"
-    authors: list[str] = Field(default_factory=list)
-    year: int = 0
-    doi: str = ""
-
-
-def _strip_fences(text: str) -> str:
-    """Remove ```json...``` markdown wrappers if LLM added them."""
-    return _MARKDOWN_FENCE_RE.sub("", text).strip()
-
-
-def _parse_metadata_json(raw_text: str, fallback_text: str = "") -> ExtractedMetadata:  # R168-3.4 added fallback_text
-    """Parse LLM output to ExtractedMetadata, defaulting any invalid fields.
-
-    Matches TS field-by-field defaulting (title default 'Untitled' only if
-    missing/empty string).
-    """
-    cleaned = _strip_fences(raw_text)
-    parsed = json.loads(cleaned)
-    if not isinstance(parsed, dict):
-        raise ValueError("expected JSON object")
-
-    # Defensive field handling — match TS partial typing
-    title_raw = parsed.get("title")
-    title = title_raw if isinstance(title_raw, str) and title_raw else "Untitled"
-
-    authors_raw = parsed.get("authors")
-    if isinstance(authors_raw, list):
-        authors = [a for a in authors_raw if isinstance(a, str)]
-    else:
-        authors = []
-
-    year_raw = parsed.get("year")
-    year = _coerce_year(year_raw, fallback_text or raw_text)  # R176-1a-year-fallback-fix
-
-    doi_raw = parsed.get("doi")
-    doi = doi_raw if isinstance(doi_raw, str) else ""
-
-    return ExtractedMetadata(title=title, authors=authors, year=year, doi=doi)
+    title: str = Field(default="Untitled", description="Full proper paper title")
+    authors: list[str] = Field(default_factory=list, description="Author names as First Last")
+    year: int = Field(default=0, description="4-digit publication year, 0 if unknown")
+    doi: str = Field(default="", description="DOI like 10.xxxx/yyyy without https://")
 
 
 def extract_metadata(first_page_text: str) -> ExtractedMetadata:
-    """Extract bibliographic metadata from OCR'd first page.
+    """Extract bibliographic metadata from OCR\'d first page.
 
     Best-effort. Returns defaults on any failure (TS pattern: never raises
     — metadata extraction is enhancement, not blocker for pipeline).
@@ -160,27 +107,35 @@ def extract_metadata(first_page_text: str) -> ExtractedMetadata:
         Always returns valid object — failures logged but not raised.
     """
     defaults = ExtractedMetadata()
-
     if not first_page_text or len(first_page_text) < MIN_INPUT_CHARS:
         return defaults
 
-    try:
-        client = _anthropic_client()
-        response = client.messages.create(
-            model=METADATA_MODEL,
-            max_tokens=METADATA_MAX_TOKENS,
-            system=[{"type": "text", "text": EXTRACT_PROMPT}],
-            messages=[{
-                "role": "user",
-                "content": first_page_text[:METADATA_INPUT_CHAR_LIMIT],
-            }],
-        )
+    settings = get_settings()
+    text_input = first_page_text[:METADATA_INPUT_CHAR_LIMIT]
 
-        text_blocks = [b.text for b in response.content if hasattr(b, "text")]
-        raw_text = "".join(text_blocks)
+    parsed, in_tok, out_tok = extract_json(
+        model=settings.gemini_model_metadata,
+        prompt=text_input,
+        schema=ExtractedMetadata,
+        system_instruction=EXTRACT_PROMPT,
+        max_tokens=settings.gemini_max_tokens_metadata,
+        temperature=0.0,
+        thinking_budget=0,
+    )
 
-        return _parse_metadata_json(raw_text, fallback_text=first_page_text)  # R168-3.4
+    # Cost telemetry — best-effort log, caller doesn\'t track this step
+    # Gemini 3 Flash pricing: $0.50/1M in, $3.00/1M out
+    cost_usd = (in_tok * 0.50 + out_tok * 3.00) / 1_000_000
+    logger.info(
+        "metadata_extract_cost in_tok=%d out_tok=%d cost_usd=%.6f",
+        in_tok, out_tok, cost_usd,
+    )
 
-    except Exception as exc:  # noqa: BLE001 — best-effort, never raise
-        logger.warning("metadata_extract_failed err=%s", exc)
+    if parsed is None:
+        logger.warning("metadata_extract_returned_none — using defaults")
         return defaults
+
+    # Re-apply year coercion (Gemini may return string "2024" or 0)
+    parsed.year = _coerce_year(parsed.year, fallback_text=first_page_text)
+
+    return parsed
