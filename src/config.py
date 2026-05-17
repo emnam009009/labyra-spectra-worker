@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=(".env", ".env.local"), extra="ignore")
 
     gcp_project_id: str = "labyra-app-dev"
     gcp_region: str = "asia-southeast1"
@@ -17,6 +17,18 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-5-20250929"
     anthropic_max_tokens: int = 4096
+    # R177-1a-gemini-infra: Gemini for metadata extract + chunk enrichment
+    # (cheaper alternative to Haiku 4.5 for structured JSON tasks).
+    # Sonnet analyzer in src/ai/analyzer.py intentionally stays on Anthropic
+    # for scientific output reliability + audit trail (provider isolation).
+    gemini_api_key: str = ""
+    gemini_model_metadata: str = "gemini-3-flash-preview"
+    gemini_model_enrich: str = "gemini-3-flash-preview"
+    gemini_max_tokens_metadata: int = 500
+    gemini_max_tokens_enrich: int = 200
+    # R177-1a Google Books API for book/textbook metadata resolution
+    # (Crossref doesn't index books → fallback path for documentType='book')
+    books_api_key: str = ""
 
     # R167-B2: Mistral OCR for paper processing pipeline
     mistral_api_key: str = ""
