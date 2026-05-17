@@ -49,7 +49,7 @@ gcloud run deploy "$SERVICE" \
   --min-instances 0 \
   --concurrency 1 \
   --set-env-vars "GCP_PROJECT_ID=${PROJECT_ID},GCP_REGION=${REGION},FIREBASE_BUCKET=${FIREBASE_BUCKET},DEFAULT_LOCALE=en,ANALYSIS_VERSION=xrd-1.0.0,PINECONE_INDEX_NAME=labyra-papers" \
-  --set-secrets "ANTHROPIC_API_KEY=anthropic-api-key:latest,MP_API_KEY=mp-api-key:latest,MISTRAL_API_KEY=mistral-api-key:latest,VOYAGE_API_KEY=voyage-api-key:latest,PINECONE_API_KEY=pinecone-api-key:latest" \
+  --set-secrets "ANTHROPIC_API_KEY=anthropic-api-key:latest,MP_API_KEY=mp-api-key:latest,MISTRAL_API_KEY=mistral-api-key:latest,VOYAGE_API_KEY=voyage-api-key:latest,PINECONE_API_KEY=pinecone-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,BOOKS_API_KEY=books-api-key:latest" \
   --quiet
 
 SERVICE_URL=$(gcloud run services describe "$SERVICE" --region="$REGION" --format="value(status.url)")
