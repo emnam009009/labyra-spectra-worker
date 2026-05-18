@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     gemini_model_enrich: str = "gemini-3-flash-preview"
     gemini_max_tokens_metadata: int = 500
     gemini_max_tokens_enrich: int = 200
+    # R178-3: domain classification (taxonomy v1, ~$0.001/paper)
+    # @r178-3-applied
+    gemini_model_classify: str = "gemini-3-flash-preview"
+    gemini_max_tokens_classify: int = 300
     # R177-1a Google Books API for book/textbook metadata resolution
     # (Crossref doesn't index books → fallback path for documentType='book')
     books_api_key: str = ""
