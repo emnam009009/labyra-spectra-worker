@@ -176,6 +176,29 @@ class PaperDoc(BaseModel):
         return _coerce_timestamp_to_epoch_ms(v)
 
 
+
+    # R178-3: domain classification (taxonomy v1) — @r178-3-hotfix2-applied
+    domain: str = Field(default="", alias="domain")
+    """Primary domain slug (one of PRIMARY_DOMAINS, 25 options)."""
+
+    subtopics: list[str] = Field(default_factory=list, alias="subtopics")
+    """0-4 subtopic slugs from SUBTOPIC_DOMAINS."""
+
+    domain_confidence: str = Field(default="", alias="domainConfidence")
+    """high|medium|low confidence label from Gemini."""
+
+    domain_classified_at: int = Field(default=0, alias="domainClassifiedAt")
+    """Epoch ms when classification was written."""
+
+    domain_model_version: str = Field(default="", alias="domainModelVersion")
+    """e.g., gemini-3-flash-preview — for audit + reclassify targeting."""
+
+    domain_prompt_version: str = Field(default="", alias="domainPromptVersion")
+    """e.g., v1.0 — bump when prompt changes."""
+
+    domain_taxonomy_version: str = Field(default="", alias="domainTaxonomyVersion")
+    """e.g., v1 — bump when taxonomy slugs change."""
+
 class OcrPage(BaseModel):
     """Single page OCR result."""
 

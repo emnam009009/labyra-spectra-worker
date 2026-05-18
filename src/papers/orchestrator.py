@@ -212,7 +212,74 @@ def process_paper(
         # ── STEP 2: Chunking ────────────────────────────────
         update_status(db, tenant_id, paper_id, "chunking")
         _log_event("step_chunking_start", paper=paper_id)
-        chunks = chunk_paper(ocr_result)
+    
+    # ─── Step 1d: Domain classification (R178-3) ────────────────────────
+    # @r178-3-applied
+    # Best-effort: failure → fallback unknown, never blocks pipeline.
+    # Audit log: tenants/{tid}/_audit_classify/{paperId}_{ts}
+    try:
+        from src.papers.classify import classify_paper_domain
+        from google.cloud.firestore_v1 import SERVER_TIMESTAMP
+        import time as _time
+
+        classify_result = classify_paper_domain(full_text)
+        now_ms = int(_time.time() * 1000)
+
+        # Update paper doc with classification
+        update_status(
+            db, tenant_id, paper_id,
+            status="chunking",  # advance pipeline
+            extra_fields={
+                "domain": classify_result.classification.primary,
+                "subtopics": classify_result.classification.subtopics,
+                "domainConfidence": classify_result.classification.confidence.value,
+                "domainClassifiedAt": now_ms,
+                "domainModelVersion": classify_result.model_version,
+                "domainPromptVersion": classify_result.prompt_version,
+                "domainTaxonomyVersion": classify_result.taxonomy_version,
+            },
+        )
+
+        # Audit log entry (always written, success or reject)
+        audit_id = f"{paper_id}_{now_ms}"
+        audit_doc = {
+            "paperId": paper_id,
+            "classifiedAt": SERVER_TIMESTAMP,
+            "modelVersion": classify_result.model_version,
+            "promptVersion": classify_result.prompt_version,
+            "taxonomyVersion": classify_result.taxonomy_version,
+            "inputTokens": classify_result.input_tokens,
+            "outputTokens": classify_result.output_tokens,
+            "costUsd": classify_result.cost_usd,
+            "result": {
+                "primary": classify_result.classification.primary,
+                "subtopics": classify_result.classification.subtopics,
+                "confidence": classify_result.classification.confidence.value,
+                "reasoning": classify_result.classification.reasoning,
+            },
+        }
+        if classify_result.rejected:
+            audit_doc["rejected"] = {
+                "reason": classify_result.rejected_reason,
+                "rawResponse": classify_result.raw_response[:2000],
+            }
+        db.document(
+            f"tenants/{tenant_id}/_audit_classify/{audit_id}"
+        ).set(audit_doc)
+
+        logger.info(
+            "step1d_classify_done tenant=%s paper=%s primary=%s rejected=%s cost=%.6f",
+            tenant_id, paper_id,
+            classify_result.classification.primary,
+            classify_result.rejected, classify_result.cost_usd,
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort
+        logger.warning(
+            "step1d_classify_failed tenant=%s paper=%s err=%s — continuing pipeline",
+            tenant_id, paper_id, exc,
+        )
+
+    chunks = chunk_paper(ocr_result)
         db.document(f"tenants/{tenant_id}/papers/{paper_id}").update({
             "chunkCount": len(chunks),
         })
