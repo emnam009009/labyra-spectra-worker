@@ -199,6 +199,23 @@ class PaperDoc(BaseModel):
     domain_taxonomy_version: str = Field(default="", alias="domainTaxonomyVersion")
     """e.g., v1 — bump when taxonomy slugs change."""
 
+    # R179-2: journal metadata via Crossref/OpenAlex — @r179-2-applied
+    journal: str = Field(default="", alias="journal")
+    """Full journal name from Crossref container-title."""
+
+    journal_short: str = Field(default="", alias="journalShort")
+    """Abbreviated journal name (Crossref short-container-title)."""
+
+    journal_issn: list[str] = Field(default_factory=list, alias="journalIssn")
+    """0-2 ISSN strings (print + electronic)."""
+
+    journal_source_id: str = Field(default="", alias="journalSourceId")
+    """'crossref' | 'openalex' | '' if both failed."""
+
+    journal_resolved_at: int = Field(default=0, alias="journalResolvedAt")
+    """Epoch ms when Step 1e completed."""
+
+
 class OcrPage(BaseModel):
     """Single page OCR result."""
 

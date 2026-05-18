@@ -279,6 +279,52 @@ def process_paper(
             tenant_id, paper_id, exc,
         )
 
+
+    # ─── Step 1e: Journal metadata resolution (R179-2) ────────────────
+    # @r179-2-applied
+    # Best-effort: failure → fields stay empty, pipeline continues.
+    # No audit log: lookup is deterministic API call (unlike R178-3 classify
+    # which depends on Gemini prompt/model versioning).
+    try:
+        from src.papers.journal_resolve import resolve_journal_from_doi
+
+        # Get DOI from metadata extracted in Step 1b. `meta` may be the
+        # variable name; fall back to reading from Firestore if missing.
+        doi_value = ""
+        try:
+            doi_value = meta.doi if (meta is not None and hasattr(meta, "doi")) else ""
+        except Exception:
+            doi_value = ""
+
+        if doi_value:
+            journal_result = resolve_journal_from_doi(doi_value)
+            update_status(
+                db, tenant_id, paper_id,
+                status="chunking",  # leave pipeline status as-is, only update fields
+                extra_fields={
+                    "journal": journal_result.journal,
+                    "journalShort": journal_result.journal_short,
+                    "journalIssn": journal_result.journal_issn,
+                    "journalSourceId": journal_result.source_id,
+                    "journalResolvedAt": journal_result.resolved_at,
+                },
+            )
+            logger.info(
+                "step1e_journal_done tenant=%s paper=%s journal=%s source=%s rejected=%s",
+                tenant_id, paper_id,
+                journal_result.journal or "(none)",
+                journal_result.source_id or "(none)",
+                journal_result.rejected,
+            )
+        else:
+            logger.info("step1e_journal_skip tenant=%s paper=%s reason=no_doi",
+                        tenant_id, paper_id)
+    except Exception as exc:  # noqa: BLE001 — best-effort
+        logger.warning(
+            "step1e_journal_failed tenant=%s paper=%s err=%s — continuing pipeline",
+            tenant_id, paper_id, exc,
+        )
+
     chunks = chunk_paper(ocr_result)
         db.document(f"tenants/{tenant_id}/papers/{paper_id}").update({
             "chunkCount": len(chunks),
