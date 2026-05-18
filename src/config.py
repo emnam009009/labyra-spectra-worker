@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # Sonnet analyzer in src/ai/analyzer.py intentionally stays on Anthropic
     # for scientific output reliability + audit trail (provider isolation).
     gemini_api_key: str = ""
-    gemini_model_metadata: str = "gemini-3-flash-preview"
+    gemini_model_metadata: str = "gemini-3-flash-preview"  # @r179-4-applied
     gemini_model_enrich: str = "gemini-3-flash-preview"
     gemini_max_tokens_metadata: int = 500
     gemini_max_tokens_enrich: int = 200

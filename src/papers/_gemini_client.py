@@ -46,6 +46,22 @@ def get_gemini_client() -> genai.Client:
     return genai.Client(api_key=settings.gemini_api_key)
 
 
+
+def _budget_to_level(budget: int) -> str:
+    """Convert legacy thinking_budget int to Gemini 3 thinking_level string.
+
+    Gemini 3 deprecated thinking_budget=0 — use "minimal" for fastest latency.
+    @r179-4b-applied
+    """
+    if budget <= 0:
+        return "minimal"  # fastest, lowest cost, no reasoning
+    if budget < 4096:
+        return "low"
+    if budget < 16384:
+        return "medium"
+    return "high"
+
+
 def _build_config(
     *,
     system_instruction: str | None,
@@ -59,7 +75,8 @@ def _build_config(
     kwargs: dict = {
         "max_output_tokens": max_tokens,
         "temperature": temperature,
-        "thinking_config": genai_types.ThinkingConfig(thinking_budget=thinking_budget),
+        # @r179-4b-applied: Gemini 3 uses thinking_level (str) not thinking_budget (int)
+        "thinking_config": genai_types.ThinkingConfig(thinking_level=_budget_to_level(thinking_budget)),
     }
     if system_instruction:
         kwargs["system_instruction"] = system_instruction

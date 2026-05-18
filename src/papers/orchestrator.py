@@ -126,7 +126,30 @@ def process_paper(
         # R177-1d: also detects documentType + isbn + publisher (for books)
         first_page_text = ocr_result.pages[0].text if ocr_result.pages else ""
         try:
+            # @r179-8-applied: log input + output for debug
+            logger.info(
+                "step1b_input tenant=%s paper=%s page0_len=%d page0_preview=%r",
+                tenant_id, paper_id, len(first_page_text), first_page_text[:200],
+            )
             meta = extract_metadata(first_page_text)
+            logger.info(
+                "step1b_output tenant=%s paper=%s title=%r authors=%d year=%s doi=%r",
+                tenant_id, paper_id, meta.title, len(meta.authors), meta.year, meta.doi,
+            )
+            # Persist input length + output snapshot to Firestore for offline debug
+            try:
+                db.document(f"tenants/{tenant_id}/papers/{paper_id}").update({
+                    "_debugStep1b": {
+                        "page0Len": len(first_page_text),
+                        "page0Preview": first_page_text[:300],
+                        "extractedTitle": meta.title,
+                        "extractedAuthors": meta.authors[:3] if meta.authors else [],
+                        "extractedYear": meta.year,
+                        "extractedDoi": meta.doi,
+                    },
+                })
+            except Exception:
+                pass
             update_payload = {
                 "title": meta.title,
                 "authors": meta.authors,
@@ -157,7 +180,15 @@ def process_paper(
                 document_type=meta.document_type,
             )
         except Exception as exc:  # noqa: BLE001 — non-fatal
-            _log_event("metadata_extract_skipped", paper=paper_id, error=str(exc)[:100])
+            # @r179-6-applied: persist exception detail to Firestore for debug
+            error_repr = f"{type(exc).__name__}: {exc}"[:300]
+            _log_event("metadata_extract_skipped", paper=paper_id, error=error_repr[:100])
+            try:
+                db.document(f"tenants/{tenant_id}/papers/{paper_id}").update({
+                    "metadataExtractError": error_repr,
+                })
+            except Exception:
+                pass  # debug field is best-effort
             meta = None  # used by Step 1c
 
         # ── STEP 1c: Book metadata resolve (R177-1d, best-effort) ──
@@ -209,27 +240,19 @@ def process_paper(
                     error=str(exc)[:100],
                 )
 
-        # ── STEP 2: Chunking ────────────────────────────────
-        update_status(db, tenant_id, paper_id, "chunking")
-        _log_event("step_chunking_start", paper=paper_id)
-    
-    # ─── Step 1d: Domain classification (R178-3) ────────────────────────
-    # @r178-3-applied
-    # Best-effort: failure → fallback unknown, never blocks pipeline.
-    # Audit log: tenants/{tid}/_audit_classify/{paperId}_{ts}
-    try:
-        from src.papers.classify import classify_paper_domain
-        from google.cloud.firestore_v1 import SERVER_TIMESTAMP
-        import time as _time
+        # ── STEP 1d: Domain classification (R178-3) ────────────
+        # @r178-3-applied
+        # @r179-5-applied: re-indented INSIDE try block (was orphan 4-space)
+        # Best-effort: failure → fallback unknown, never blocks pipeline.
+        # Audit log: tenants/{tid}/_audit_classify/{paperId}_{ts}
+        try:
+            from src.papers.classify import classify_paper_domain
+            import time as _time
 
-        classify_result = classify_paper_domain(full_text)
-        now_ms = int(_time.time() * 1000)
+            classify_result = classify_paper_domain(ocr_result.full_text)
+            now_ms = int(_time.time() * 1000)
 
-        # Update paper doc with classification
-        update_status(
-            db, tenant_id, paper_id,
-            status="chunking",  # advance pipeline
-            extra_fields={
+            db.document(f"tenants/{tenant_id}/papers/{paper_id}").update({
                 "domain": classify_result.classification.primary,
                 "subtopics": classify_result.classification.subtopics,
                 "domainConfidence": classify_result.classification.confidence.value,
@@ -237,95 +260,87 @@ def process_paper(
                 "domainModelVersion": classify_result.model_version,
                 "domainPromptVersion": classify_result.prompt_version,
                 "domainTaxonomyVersion": classify_result.taxonomy_version,
-            },
-        )
+            })
 
-        # Audit log entry (always written, success or reject)
-        audit_id = f"{paper_id}_{now_ms}"
-        audit_doc = {
-            "paperId": paper_id,
-            "classifiedAt": SERVER_TIMESTAMP,
-            "modelVersion": classify_result.model_version,
-            "promptVersion": classify_result.prompt_version,
-            "taxonomyVersion": classify_result.taxonomy_version,
-            "inputTokens": classify_result.input_tokens,
-            "outputTokens": classify_result.output_tokens,
-            "costUsd": classify_result.cost_usd,
-            "result": {
-                "primary": classify_result.classification.primary,
-                "subtopics": classify_result.classification.subtopics,
-                "confidence": classify_result.classification.confidence.value,
-                "reasoning": classify_result.classification.reasoning,
-            },
-        }
-        if classify_result.rejected:
-            audit_doc["rejected"] = {
-                "reason": classify_result.rejected_reason,
-                "rawResponse": classify_result.raw_response[:2000],
+            audit_id = f"{paper_id}_{now_ms}"
+            audit_doc = {
+                "paperId": paper_id,
+                "classifiedAt": SERVER_TIMESTAMP,
+                "modelVersion": classify_result.model_version,
+                "promptVersion": classify_result.prompt_version,
+                "taxonomyVersion": classify_result.taxonomy_version,
+                "inputTokens": classify_result.input_tokens,
+                "outputTokens": classify_result.output_tokens,
+                "costUsd": classify_result.cost_usd,
+                "result": {
+                    "primary": classify_result.classification.primary,
+                    "subtopics": classify_result.classification.subtopics,
+                    "confidence": classify_result.classification.confidence.value,
+                    "reasoning": classify_result.classification.reasoning,
+                },
             }
-        db.document(
-            f"tenants/{tenant_id}/_audit_classify/{audit_id}"
-        ).set(audit_doc)
+            if classify_result.rejected:
+                audit_doc["rejected"] = {
+                    "reason": classify_result.rejected_reason,
+                    "rawResponse": classify_result.raw_response[:2000],
+                }
+            db.document(
+                f"tenants/{tenant_id}/_audit_classify/{audit_id}"
+            ).set(audit_doc)
 
-        logger.info(
-            "step1d_classify_done tenant=%s paper=%s primary=%s rejected=%s cost=%.6f",
-            tenant_id, paper_id,
-            classify_result.classification.primary,
-            classify_result.rejected, classify_result.cost_usd,
-        )
-    except Exception as exc:  # noqa: BLE001 — best-effort
-        logger.warning(
-            "step1d_classify_failed tenant=%s paper=%s err=%s — continuing pipeline",
-            tenant_id, paper_id, exc,
-        )
+            logger.info(
+                "step1d_classify_done tenant=%s paper=%s primary=%s rejected=%s cost=%.6f",
+                tenant_id, paper_id,
+                classify_result.classification.primary,
+                classify_result.rejected, classify_result.cost_usd,
+            )
+        except Exception as exc:  # noqa: BLE001 — best-effort
+            logger.warning(
+                "step1d_classify_failed tenant=%s paper=%s err=%s — continuing pipeline",
+                tenant_id, paper_id, exc,
+            )
 
-
-    # ─── Step 1e: Journal metadata resolution (R179-2) ────────────────
-    # @r179-2-applied
-    # Best-effort: failure → fields stay empty, pipeline continues.
-    # No audit log: lookup is deterministic API call (unlike R178-3 classify
-    # which depends on Gemini prompt/model versioning).
-    try:
-        from src.papers.journal_resolve import resolve_journal_from_doi
-
-        # Get DOI from metadata extracted in Step 1b. `meta` may be the
-        # variable name; fall back to reading from Firestore if missing.
-        doi_value = ""
+        # ── STEP 1e: Journal metadata resolution (R179-2) ────
+        # @r179-2-applied
+        # @r179-5-applied: re-indented INSIDE try block
         try:
-            doi_value = meta.doi if (meta is not None and hasattr(meta, "doi")) else ""
-        except Exception:
-            doi_value = ""
+            from src.papers.journal_resolve import resolve_journal_from_doi
 
-        if doi_value:
-            journal_result = resolve_journal_from_doi(doi_value)
-            update_status(
-                db, tenant_id, paper_id,
-                status="chunking",  # leave pipeline status as-is, only update fields
-                extra_fields={
+            doi_value = ""
+            if meta is not None and hasattr(meta, "doi"):
+                doi_value = meta.doi or ""
+
+            if doi_value:
+                journal_result = resolve_journal_from_doi(doi_value)
+                db.document(f"tenants/{tenant_id}/papers/{paper_id}").update({
                     "journal": journal_result.journal,
                     "journalShort": journal_result.journal_short,
                     "journalIssn": journal_result.journal_issn,
                     "journalSourceId": journal_result.source_id,
                     "journalResolvedAt": journal_result.resolved_at,
-                },
+                })
+                logger.info(
+                    "step1e_journal_done tenant=%s paper=%s journal=%s source=%s rejected=%s",
+                    tenant_id, paper_id,
+                    journal_result.journal or "(none)",
+                    journal_result.source_id or "(none)",
+                    journal_result.rejected,
+                )
+            else:
+                logger.info(
+                    "step1e_journal_skip tenant=%s paper=%s reason=no_doi",
+                    tenant_id, paper_id,
+                )
+        except Exception as exc:  # noqa: BLE001 — best-effort
+            logger.warning(
+                "step1e_journal_failed tenant=%s paper=%s err=%s — continuing pipeline",
+                tenant_id, paper_id, exc,
             )
-            logger.info(
-                "step1e_journal_done tenant=%s paper=%s journal=%s source=%s rejected=%s",
-                tenant_id, paper_id,
-                journal_result.journal or "(none)",
-                journal_result.source_id or "(none)",
-                journal_result.rejected,
-            )
-        else:
-            logger.info("step1e_journal_skip tenant=%s paper=%s reason=no_doi",
-                        tenant_id, paper_id)
-    except Exception as exc:  # noqa: BLE001 — best-effort
-        logger.warning(
-            "step1e_journal_failed tenant=%s paper=%s err=%s — continuing pipeline",
-            tenant_id, paper_id, exc,
-        )
 
-    chunks = chunk_paper(ocr_result)
+        # ── STEP 2: Chunking ────────────────────────────────
+        update_status(db, tenant_id, paper_id, "chunking")
+        _log_event("step_chunking_start", paper=paper_id)
+        chunks = chunk_paper(ocr_result)
         db.document(f"tenants/{tenant_id}/papers/{paper_id}").update({
             "chunkCount": len(chunks),
         })
@@ -334,7 +349,7 @@ def process_paper(
         if not chunks:
             raise FatalError("no chunks extracted — empty or malformed OCR output")
 
-        # ── STEP 3: Contextual enrichment (default OFF) ─────
+                # ── STEP 3: Contextual enrichment (default OFF) ─────
         update_status(db, tenant_id, paper_id, "enriching")
         _log_event("step_enriching_start", paper=paper_id)
         enriched = run_enrich_step(db, tenant_id, paper_id, ocr_result.full_text, chunks)
