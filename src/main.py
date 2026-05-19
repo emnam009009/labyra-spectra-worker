@@ -461,3 +461,18 @@ async def sync_materials(req: MaterialSyncRequest, request: Request) -> dict:
         "results": results,
     }
 
+# ── R185-4f: cache observability ──────────────────────────────────────────────
+
+@app.get("/materials/cache-stats")
+def materials_cache_stats() -> dict:
+    """Return materialProfile cache hit/miss stats. Ops monitoring."""
+    from src.deviation.profile_cache import cache_stats
+    return cache_stats()
+
+
+@app.post("/materials/cache-clear", status_code=status.HTTP_204_NO_CONTENT)
+async def materials_cache_clear(request: Request) -> None:
+    """Clear materialProfile cache. Call after admin updates profiles."""
+    from src.deviation.profile_cache import cache_clear
+    cache_clear()
+

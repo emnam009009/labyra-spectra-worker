@@ -95,3 +95,32 @@ def write_analysis_result(
 def write_quick_stats(tenant_id: str, spectrum_id: str, stats: dict[str, Any]) -> None:
     """Update SpectrumMetadata.quickStats with row count, x/y range, peak count."""
     spectrum_ref(tenant_id, spectrum_id).update({"quickStats": stats})
+
+# ── R185-3a: Material profile fetch for deviation analysis ────────────────────
+
+def _fetch_material_profile_uncached(formula: str) -> dict[str, Any] | None:
+    """Uncached Firestore read of /materialProfiles/{formula}."""
+    if not formula:
+        return None
+    db = _client()
+    snap = db.collection("materialProfiles").document(formula).get()
+    if not snap.exists:
+        return None
+    data = snap.to_dict()
+    if data is None:
+        return None
+    data["id"] = snap.id
+    return data
+
+
+def get_material_profile(formula: str) -> dict[str, Any] | None:
+    """Fetch /materialProfiles/{formula} with TTL LRU cache (R185-4f).
+
+    Root collection (not tenant-scoped) — global scientific reference data.
+    Cache hit ~95% in production for hot materials.
+    """
+    if not formula:
+        return None
+    from src.deviation.profile_cache import cached_get_material_profile
+    return cached_get_material_profile(formula, _fetch_material_profile_uncached)
+
