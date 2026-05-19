@@ -15,3 +15,6 @@ from src.deviation.crystallinity import (
     SizeEstimate,
 )
 from src.deviation.composite_rules import run_composite_rules, COMPOSITE_RULES
+from src.deviation.fraction_estimator import estimate_fractions, FractionEstimate
+from src.deviation.fraction_estimator import estimate_xrd_direct_comparison
+from src.deviation.mass_absorption import compound_mac

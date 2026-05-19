@@ -20,6 +20,7 @@ from src.deviation.multi_phase import (
     match_multi_phase,
 )
 from src.deviation.composite_rules import run_composite_rules
+from src.deviation.fraction_estimator import estimate_fractions
 from src.deviation.crystallinity import classify_crystallinity, adaptive_tolerance
 from src.deviation.peak_matcher import (
     DEFAULT_TOLERANCES,
@@ -139,11 +140,26 @@ def run_deviation_analysis(
                 ctx={"laser_wavelength": laser_wavelength},
             )
 
+            # R185-7: fraction estimation per component
+            #   - XRD: RIR (if profiles have rirFactor) → quantitative
+            #   - Raman: intensity ratio (qualitative only)
+            #   - Others: peak-count fallback
+            profile_dict = {
+                c.formula: profile_loader(c.formula) or {}
+                for c in multi_result.components
+            }
+            fraction_estimates = estimate_fractions(
+                spectrum_type=spectrum_type,
+                components=[c.to_dict() for c in multi_result.components],
+                profiles=profile_dict,
+            )
+
             return {
                 "mode": "multi-phase",
                 "multiPhase": multi_result.to_dict(),
                 "perComponentHypotheses": per_component_hyps,
                 "compositeHypotheses": [h.to_dict() for h in composite_hyps],
+                "fractionEstimates": [fe.to_dict() for fe in fraction_estimates],
                 "referenceFormula": None,
             }
 
