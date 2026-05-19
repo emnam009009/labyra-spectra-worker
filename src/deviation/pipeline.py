@@ -19,6 +19,7 @@ from src.deviation.multi_phase import (
     ComponentDeclaration,
     match_multi_phase,
 )
+from src.deviation.composite_rules import run_composite_rules
 from src.deviation.crystallinity import classify_crystallinity, adaptive_tolerance
 from src.deviation.peak_matcher import (
     DEFAULT_TOLERANCES,
@@ -132,10 +133,17 @@ def run_deviation_analysis(
                 )
                 per_component_hyps[cm.formula] = [h.to_dict() for h in hyps]
 
+            # R185-6: composite-specific rules (cross-phase phenomena)
+            composite_hyps = run_composite_rules(
+                multi_result,
+                ctx={"laser_wavelength": laser_wavelength},
+            )
+
             return {
                 "mode": "multi-phase",
                 "multiPhase": multi_result.to_dict(),
                 "perComponentHypotheses": per_component_hyps,
+                "compositeHypotheses": [h.to_dict() for h in composite_hyps],
                 "referenceFormula": None,
             }
 
