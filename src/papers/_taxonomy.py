@@ -27,7 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 TAXONOMY_VERSION = "v1"
-PROMPT_VERSION = "v1.0"
+PROMPT_VERSION = "v1.1"
 
 
 APPLICATION_SLUGS: frozenset[str] = frozenset({

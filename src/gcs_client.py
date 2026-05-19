@@ -60,3 +60,29 @@ def download_bytes(location: str) -> bytes:
 
 def download_text(gs_url: str, encoding: str = "utf-8") -> str:
     return download_bytes(gs_url).decode(encoding, errors="replace")
+
+
+# ─── R181: OCR cache helpers @r181-applied ─────────────────────────
+def upload_bytes(location: str, data: bytes, content_type: str = "application/octet-stream") -> None:
+    """Upload bytes to GCS. Accepts gs:// URL or relative path.
+
+    Used by R181 OCR cache to persist Mistral OCR JSON results so that
+    re-uploading the same PDF content (same SHA256) skips the OCR call.
+
+    @phase R181
+    """
+    bucket_name, blob_path = _resolve_bucket_and_path(location)
+    bucket = _client().bucket(bucket_name)
+    blob = bucket.blob(blob_path)
+    blob.upload_from_string(data, content_type=content_type)
+    logger.info("Uploaded %d bytes to gs://%s/%s", len(data), bucket_name, blob_path)
+
+
+def blob_exists(location: str) -> bool:
+    """Check whether a blob exists in GCS. Accepts gs:// URL or relative path.
+
+    @phase R181
+    """
+    bucket_name, blob_path = _resolve_bucket_and_path(location)
+    bucket = _client().bucket(bucket_name)
+    return bucket.blob(blob_path).exists()
