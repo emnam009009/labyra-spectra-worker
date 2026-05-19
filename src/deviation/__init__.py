@@ -2,3 +2,9 @@
 from src.deviation.peak_matcher import match_peaks, MatchResult
 from src.deviation.hypothesis import Hypothesis, RuleCitation
 from src.deviation.rules import run_rules, ALL_RULES
+from src.deviation.pipeline import run_deviation_analysis
+from src.deviation.multi_phase import (
+    match_multi_phase,
+    ComponentDeclaration,
+    MultiPhaseResult,
+)

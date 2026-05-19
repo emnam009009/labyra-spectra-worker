@@ -10,11 +10,13 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request, status
 
 from src.ai.analyzer import analyze as ai_analyze
+from src.deviation.pipeline import run_deviation_analysis
 from src.config import get_settings
 from src.firestore_client import (
     STATUS_ANALYZED,
     STATUS_FAILED,
     STATUS_PROCESSING,
+    get_material_profile,
     get_spectrum,
     get_tenant_locale,
     transition_status,
@@ -200,10 +202,52 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
     locale = get_tenant_locale(tenant_id)
     ai_result = ai_analyze(parsed, metadata, locale)
 
+    # 7b. R185-3a + R185-4: Deviation analysis (non-blocking)
+    # Routes to multi-phase when Sample.composition declared, else single-phase fallback.
+    deviation_result = None
+    composition = metadata.get("composition")  # list of {formula, role, nominalFraction}
+    if chemical_formula or composition:
+        try:
+            laser_wl = metadata.get("laserWavelength") or metadata.get("laser_wavelength")
+            material_profile = get_material_profile(chemical_formula) if chemical_formula else None
+
+            deviation_result = run_deviation_analysis(
+                spectrum_type=spectrum_type,
+                parsed=parsed,
+                material_profile=material_profile,
+                laser_wavelength=laser_wl,
+                composition=composition,
+                profile_loader=get_material_profile,
+            )
+            if deviation_result:
+                mode = deviation_result.get("mode")
+                if mode == "multi-phase":
+                    mp = deviation_result["multiPhase"]
+                    logger.info(
+                        "Deviation (multi-phase): components=%d match_rate=%.0f%% grade=%s missing=%s",
+                        len(mp["components"]),
+                        mp["overall_match_rate"] * 100,
+                        mp["overall_grade"],
+                        mp["intended_but_not_observed"],
+                    )
+                elif mode == "single-phase":
+                    mr = deviation_result["matchResult"]
+                    logger.info(
+                        "Deviation (single-phase): formula=%s match_rate=%.0f%% grade=%s hypotheses=%d",
+                        chemical_formula,
+                        mr["match_rate"] * 100,
+                        mr["quality_grade"],
+                        len(deviation_result["hypotheses"]),
+                    )
+        except Exception:  # noqa: BLE001
+            logger.exception("Deviation analysis failed (non-blocking)")
+            deviation_result = None
+
     # 8. Combine + write
     combined = {
         "parsed": parsed,
         "ai": ai_result,
+        "deviationAnalysis": deviation_result,
         "locale": locale,
         "spectrumType": spectrum_type,
     }
