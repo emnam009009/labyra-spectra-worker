@@ -19,6 +19,7 @@ from src.deviation.multi_phase import (
     ComponentDeclaration,
     match_multi_phase,
 )
+from src.deviation.crystallinity import classify_crystallinity, adaptive_tolerance
 from src.deviation.peak_matcher import (
     DEFAULT_TOLERANCES,
     SpectrumType,
@@ -155,13 +156,39 @@ def run_deviation_analysis(
 
     matcher_type_sp: SpectrumType = "uvvis" if spectrum_type == "uvvis_drs" else spectrum_type  # type: ignore[assignment]
 
-    match_result = match_peaks(
+    # R185-5: First pass with default tolerance, then classify crystallinity,
+    # then re-match if classification suggests broader tolerance is needed.
+    base_tol = DEFAULT_TOLERANCES[matcher_type_sp]
+    first_pass = match_peaks(
         sample_peaks=sample_peaks,
         ref_peaks=sig["peaks"],
         spectrum_type=matcher_type_sp,
         reference_formula=formula,
         reference_label=label,
+        tolerance=base_tol,
     )
+
+    crystal = classify_crystallinity(
+        spectrum_type=spectrum_type,
+        parsed=parsed,
+        sample_peaks=sample_peaks,
+        ref_peaks=sig["peaks"],
+        matches=[m.__dict__ for m in first_pass.matches],
+    )
+
+    # Re-match with adaptive tolerance if classifier suggests nano/amorphous
+    if crystal.tolerance_factor > 1.0:
+        adjusted_tol = adaptive_tolerance(base_tol, crystal.classification)
+        match_result = match_peaks(
+            sample_peaks=sample_peaks,
+            ref_peaks=sig["peaks"],
+            spectrum_type=matcher_type_sp,
+            reference_formula=formula,
+            reference_label=label,
+            tolerance=adjusted_tol,
+        )
+    else:
+        match_result = first_pass
 
     laser = laser_wavelength or sig.get("laserWavelength")
     hypotheses = run_rules(
@@ -172,6 +199,7 @@ def run_deviation_analysis(
     return {
         "mode": "single-phase",
         "matchResult": match_result.to_dict(),
+        "crystallinity": crystal.to_dict(),
         "hypotheses": [h.to_dict() for h in hypotheses],
         "referenceFormula": formula,
         "referenceLabel": label,

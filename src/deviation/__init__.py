@@ -8,3 +8,9 @@ from src.deviation.multi_phase import (
     ComponentDeclaration,
     MultiPhaseResult,
 )
+from src.deviation.crystallinity import (
+    classify_crystallinity,
+    adaptive_tolerance,
+    CrystallinityResult,
+    SizeEstimate,
+)
