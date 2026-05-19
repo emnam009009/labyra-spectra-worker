@@ -34,6 +34,7 @@ dependencies = [
 
     # Spectrum parsers (phase-3b will use XRD subset)
     "pymatgen>=2024.10.3",
+    "mp-api>=0.45.0",
     "lmfit>=1.3.2",
 
     # Validation

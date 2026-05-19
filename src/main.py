@@ -368,3 +368,52 @@ async def parse_reference(req: ParseReferenceCardRequest) -> dict:
     except Exception as exc:  # noqa: BLE001
         logger.exception("Reference parse failed")
         return {"success": False, "error": f"unexpected: {exc}"}
+
+# ============================================================================
+# R184: Materials Project sync endpoint
+# ============================================================================
+
+from pydantic import BaseModel as _BaseModel
+from typing import Optional as _Optional
+
+
+class MaterialSyncRequest(_BaseModel):
+    formulas: list[str] | None = None  # None = sync DEFAULT_FORMULAS
+
+
+@app.post("/materials/sync")
+async def sync_materials(req: MaterialSyncRequest, request: Request) -> dict:
+    """
+    Trigger Materials Project API sync for given formulas.
+    Updates /materialProfiles/{formula} in Firestore (merge).
+
+    Auth: Bearer token required (superadmin enforced by caller convention;
+    worker trusts Cloud Run IAM for internal calls).
+
+    POST /materials/sync
+    Body: {"formulas": ["MoS2", "WO3"]}  // omit for full DEFAULT_FORMULAS batch
+    """
+    from src.materials.mp_sync import sync_batch, DEFAULT_FORMULAS
+    from google.cloud import firestore as _fs
+
+    settings = get_settings()
+    if not settings.mp_api_key:
+        return {"error": "MP_API_KEY not configured", "status": "error"}
+
+    formulas = req.formulas or DEFAULT_FORMULAS
+    db = _fs.Client(project=settings.gcp_project_id)
+
+    results = sync_batch(formulas, settings.mp_api_key, db)
+
+    ok = [r for r in results if r["status"] == "ok"]
+    not_found = [r for r in results if r["status"] == "not_found"]
+    errors = [r for r in results if r["status"] == "error"]
+
+    return {
+        "total": len(formulas),
+        "ok": len(ok),
+        "not_found": len(not_found),
+        "errors": len(errors),
+        "results": results,
+    }
+

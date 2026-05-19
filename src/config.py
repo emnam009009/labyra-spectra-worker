@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     # R177-1a Google Books API for book/textbook metadata resolution
     # (Crossref doesn't index books → fallback path for documentType='book')
     books_api_key: str = ""
+    # R184: Materials Project API for crystal structure + electronic props sync
+    mp_api_key: str = ""
 
     # R167-B2: Mistral OCR for paper processing pipeline
     mistral_api_key: str = ""
