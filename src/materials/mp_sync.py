@@ -63,6 +63,7 @@ _SUMMARY_FIELDS = [
     "nsites",
     "elements",
     "theoretical",
+    "structure",  # R185-7c-1b: needed for Rietveld pattern simulation
 ]
 
 
@@ -110,6 +111,9 @@ def _doc_to_profile(best: Any) -> dict[str, Any]:
             "syncedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         },
     }
+    # R185-7c-1b: include structure in profile when available
+    if structure_dict is not None:
+        result["structure"] = structure_dict
 
     # IMPORTANT: only update crystal structure fields when MP id was looked up
     # via exact match (handled by caller); formula-search fallback should NOT

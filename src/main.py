@@ -476,3 +476,67 @@ async def materials_cache_clear(request: Request) -> None:
     from src.deviation.profile_cache import cache_clear
     cache_clear()
 
+
+# ── R185-8b: CSIE endpoints ──────────────────────────────────────────────────
+
+@app.post("/csie/{sample_id}/refresh", status_code=status.HTTP_200_OK)
+async def csie_refresh(sample_id: str, request: Request) -> dict:
+    """
+    Manual CSIE refresh trigger from UI.
+
+    Requires OIDC auth + tenantId in request body (validated by Cloud Run IAM).
+    Force=True skips debounce.
+    """
+    from src.csie.pipeline import run_csie_for_sample
+
+    try:
+        body = await request.json()
+    except Exception:
+        return {"status": "failed", "notes": ["invalid_json_body"]}
+
+    tenant_id = body.get("tenantId")
+    if not tenant_id:
+        return {"status": "failed", "notes": ["missing_tenant_id"]}
+
+    force = bool(body.get("force", False))
+    result = run_csie_for_sample(tenant_id, sample_id, force=force)
+    return result.to_dict()
+
+
+@app.post("/csie/process", status_code=status.HTTP_200_OK)
+async def csie_process(request: Request) -> dict:
+    """
+    Pub/Sub-triggered CSIE compute endpoint.
+
+    Subscriber URL: receives push from csie-trigger topic with body
+    { tenantId, sampleId } (base64 wrapped in Pub/Sub envelope).
+    """
+    from src.csie.pipeline import run_csie_for_sample
+    import base64
+    import json
+
+    try:
+        envelope = await request.json()
+    except Exception:
+        return {"status": "failed", "notes": ["invalid_envelope"]}
+
+    # Pub/Sub envelope: { message: { data: base64, ... } }
+    message = envelope.get("message") or {}
+    raw_data = message.get("data")
+    if not raw_data:
+        return {"status": "failed", "notes": ["missing_message_data"]}
+
+    try:
+        decoded = base64.b64decode(raw_data).decode()
+        payload = json.loads(decoded)
+    except Exception:
+        return {"status": "failed", "notes": ["malformed_message"]}
+
+    tenant_id = payload.get("tenantId")
+    sample_id = payload.get("sampleId")
+    if not tenant_id or not sample_id:
+        return {"status": "failed", "notes": ["missing_fields"]}
+
+    result = run_csie_for_sample(tenant_id, sample_id, force=False)
+    return result.to_dict()
+
