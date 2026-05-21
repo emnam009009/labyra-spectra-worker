@@ -52,3 +52,6 @@ spectra_samples/
 *.bak
 *.bak[0-9]*
 *.bak.*
+
+# Patch idempotency markers (round-NNN)
+.r[0-9]*-applied
