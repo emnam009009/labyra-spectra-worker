@@ -152,6 +152,11 @@ class PaperDoc(BaseModel):
     year: int = 0
     doi: str = ""
 
+    # ADR-034 TEAM-5: research group for KB isolation. Read from the paper doc
+    # (set by labyra-app on upload + backfilled). Default 'lab-shared' matches
+    # the Firestore-rules defensive default — a missing field = visible to all.
+    group_id: str = Field(alias="groupId", default="lab-shared")
+
     # R177-1d: book/non-article document type support
     # documentType detected by metadata.py Gemini extract; routes resolution
     # path in orchestrator (article=Crossref+OpenAlex, book=Google Books).

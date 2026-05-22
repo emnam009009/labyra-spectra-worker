@@ -80,6 +80,9 @@ def _build_metadata(
         "paperAuthors": authors,
         "paperYear": paper.year,
         "paperDoi": paper.doi,
+        # ADR-034 TEAM-5: group scope for RAG isolation. MUST match TS
+        # PaperChunkMetadata.groupId (added same effort in labyra-app).
+        "groupId": paper.group_id,
     }
 
 
