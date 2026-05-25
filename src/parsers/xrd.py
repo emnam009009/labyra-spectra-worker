@@ -153,7 +153,9 @@ def _parse_two_column(text: str) -> tuple[np.ndarray, np.ndarray]:
             if df.shape[1] >= 2 and len(df) > 10:
                 x = df.iloc[:, 0].to_numpy(dtype=float)
                 y = df.iloc[:, 1].to_numpy(dtype=float)
-                if 1 < x.min() < 80 and x.max() < 180:
+                # B3: accept grazing-incidence/GISAXS (low-angle) + high-angle-only
+                # scans. Only reject clearly-out-of-range or non-monotone data.
+                if 0.1 < x.min() and x.max() <= 180 and x.max() > x.min():
                     return x, y
         except Exception:  # noqa: BLE001
             continue
@@ -242,7 +244,8 @@ def _enrich_peaks(
         # Per-peak Scherrer crystallite size D (nm)
         fwhm_rad = math.radians(p["fwhm"])
         D_nm = None
-        if fwhm_rad > 0:
+        # B1: guard cos_theta (→0 as 2θ→180°) to avoid inf/negative crystallite size
+        if fwhm_rad > 0 and cos_theta > 1e-6:
             D_angstrom = (K_SCHERRER * wavelength) / (fwhm_rad * cos_theta)
             D_nm = D_angstrom / 10.0
 
@@ -313,7 +316,8 @@ def _scherrer_crystallite_size(peaks: list[dict[str, float]], wavelength: float 
     for p in top3:
         theta_rad = math.radians(p["two_theta"] / 2.0)
         fwhm_rad = math.radians(p["fwhm"])
-        if fwhm_rad <= 0:
+        # B2: guard fwhm AND cos_theta (→0 at high angle) before division
+        if fwhm_rad <= 0 or math.cos(theta_rad) <= 1e-6:
             continue
         D = (K_SCHERRER * wavelength) / (fwhm_rad * math.cos(theta_rad))  # in Å
         sizes.append(D / 10.0)  # → nm
