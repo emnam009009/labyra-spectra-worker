@@ -85,8 +85,8 @@ def normalize_formula(formula: str) -> str:
         c = parsed[el]
         if c == 1.0:
             parts.append(el)
-        elif c == int(c):
-            parts.append(f"{el}{int(c)}")
+        elif abs(c - round(c)) < 1e-6:
+            parts.append(f"{el}{round(c)}")
         else:
             parts.append(f"{el}{c}")
     return "".join(parts)

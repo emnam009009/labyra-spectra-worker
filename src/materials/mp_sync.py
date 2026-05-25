@@ -70,7 +70,7 @@ _SUMMARY_FIELDS = [
 def _conductivity_type(band_gap: float | None) -> str:
     if band_gap is None:
         return "unknown"
-    if band_gap == 0.0:
+    if abs(band_gap) < 1e-6:
         return "metal"
     if band_gap < 0.5:
         return "semimetal"

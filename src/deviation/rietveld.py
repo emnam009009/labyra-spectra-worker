@@ -516,8 +516,12 @@ def refine_full(
     valid_mass = {f: mf for f, mf in mass_factors.items() if mf is not None}
 
     phase_results: list[RietveldPhaseResult] = []
+    rietveld_diverged = False
     if len(valid_mass) == len(formulas):
         total = sum(scales_with_unc[f][0] * mass_factors[f] for f in formulas)  # type: ignore[operator]
+        # B5: total<=0 means all scale factors hit the lower bound — the
+        # fit diverged; phases will all read 0% which is misleading.
+        rietveld_diverged = total <= 0
         for formula in formulas:
             s, ds = scales_with_unc[formula]
             mf = mass_factors[formula]
@@ -558,6 +562,11 @@ def refine_full(
             notes.append(f"R_wp {r_wp}% — good fit quality")
     if profile.W < 1e-4:
         notes.append("W parameter at lower bound; FWHM may be unrealistic")
+    if rietveld_diverged:
+        notes.append(
+            "All phase scale factors near zero — Rietveld fit diverged; "
+            "mass fractions are not meaningful. Check initial structures + 2theta range."
+        )
 
     # GoF interpretation note
     if gof is not None:
