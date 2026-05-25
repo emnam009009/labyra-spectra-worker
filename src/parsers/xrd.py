@@ -13,7 +13,7 @@ from scipy.optimize import curve_fit
 from scipy.signal import find_peaks, savgol_filter
 
 from src.parsers._tabular import parse_csv_two_column, parse_xlsx_two_column
-from src.parsers._utils import downsample_curve
+from src.parsers._utils import downsample_curve, normalize_decimal
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +143,8 @@ def resolve_wavelength(anode):
 
 
 def _parse_two_column(text: str) -> tuple[np.ndarray, np.ndarray]:
-    for sep in [",", r"\s+", "\t"]:
+    text = normalize_decimal(text)  # B4: EU decimal comma -> dot (no-op for US/dot)
+    for sep in [",", ";", r"\s+", "\t"]:
         try:
             df = pd.read_csv(
                 StringIO(text), sep=sep, header=None, comment="#",

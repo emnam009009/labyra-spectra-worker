@@ -12,6 +12,8 @@ from io import BytesIO, StringIO
 from typing import Any
 
 import numpy as np
+
+from src.parsers._utils import normalize_decimal
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -126,7 +128,7 @@ def parse_csv_two_column(text: str) -> tuple[np.ndarray, np.ndarray] | None:
         cleaned_lines.append(line)
     if not cleaned_lines:
         return None
-    cleaned = "\n".join(cleaned_lines)
+    cleaned = normalize_decimal("\n".join(cleaned_lines))  # B4 EU decimal
 
     delimiters = [",", "\t", r"\s+", ";"]
     for sep in delimiters:
