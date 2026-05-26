@@ -21,6 +21,7 @@ import io
 from typing import Any
 
 import matplotlib
+import numpy as np
 
 matplotlib.use("Agg")  # headless: no display, safe on Cloud Run
 import matplotlib.pyplot as plt
@@ -38,25 +39,17 @@ _AXES: dict[str, dict[str, Any]] = {
 }
 
 
-def _peak_xy(spectrum_type: str, peaks: list[dict[str, Any]]) -> tuple[list[float], list[float]]:
-    """Extract (x, y) of peaks by spectrum type."""
+def _peak_x_values(spectrum_type: str, peaks: list[dict[str, Any]]) -> list[float]:
+    """Extract x-positions of peaks by spectrum type."""
     xkey = {
         "xrd": "two_theta",
         "raman": "shift_cm1",
         "ftir": "wavenumber_cm1",
         "uvvis": "wavelength_nm",
     }.get(spectrum_type)
-    ykey = {
-        "xrd": "intensity",
-        "raman": "intensity",
-        "ftir": "absorbance",
-        "uvvis": "absorbance",
-    }.get(spectrum_type)
-    if not xkey or not ykey:
-        return [], []
-    xs = [p[xkey] for p in peaks if xkey in p and ykey in p]
-    ys = [p[ykey] for p in peaks if xkey in p and ykey in p]
-    return xs, ys
+    if not xkey:
+        return []
+    return [p[xkey] for p in peaks if xkey in p]
 
 
 def render_spectrum_figure(
@@ -118,16 +111,26 @@ def render_spectrum_figure(
         ax.plot(x, y, color=line_color, linewidth=preset.line_width_pt)
 
         if show_peaks and peaks:
-            px, py = _peak_xy(spectrum_type, peaks)
+            px = _peak_x_values(spectrum_type, peaks)
             if px:
-                ax.scatter(px, py, marker="v", s=14, color="#b22222", zorder=5,
+                # Peak y comes from the curve itself (interpolated at each peak x),
+                # so markers sit on the line — not at a separate absorbance scale.
+                # np.interp needs ascending x; FTIR/descending arrays are sorted.
+                order = np.argsort(x)
+                xs_sorted = np.asarray(x)[order]
+                ys_sorted = np.asarray(y)[order]
+                py = np.interp(px, xs_sorted, ys_sorted)
+                # Nudge the marker just below the curve point for a "dip" cue.
+                yspan = float(np.max(y) - np.min(y)) or 1.0
+                py_marker = py - 0.03 * yspan
+                ax.scatter(px, py_marker, marker="v", s=14, color="#b22222", zorder=5,
                            linewidths=0.4, edgecolors="white")
                 if peak_labels:
                     for i, (xx, yy) in enumerate(zip(px, py, strict=False)):
                         if i < len(peak_labels) and peak_labels[i]:
                             ax.annotate(
                                 peak_labels[i], (xx, yy),
-                                textcoords="offset points", xytext=(0, 4),
+                                textcoords="offset points", xytext=(0, 5),
                                 ha="center", fontsize=preset.font_size_pt - 2,
                             )
 
