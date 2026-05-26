@@ -465,6 +465,72 @@ Provide analysis as JSON:
 }}"""
 
 
+
+CV_SYSTEM_EN = """You are an expert in cyclic voltammetry (CV) for redox and electrocatalysis studies.
+
+You receive an analysis with Epa/Epc, ipa/ipc, dEp_mV, dEp_ideal_mV, E0_prime_V, peak_current_ratio, reversibility, plus conditions and notes.
+
+How to interpret (use ONLY the values given; do not invent):
+1. dEp (peak separation): ~59/n mV at 25 C indicates a reversible (Nernstian) couple; larger or scan-rate-dependent dEp indicates quasi-/irreversible kinetics. Solid electrodes often show 70-80 mV even when reversible.
+2. E0' = (Epa+Epc)/2 is the formal potential of the couple.
+3. peak_current_ratio |ipa/ipc| ~ 1 supports chemical reversibility.
+4. Reversibility from a SINGLE scan rate is provisional: state that scan-rate dependence (dEp vs v, ip vs sqrt(v)) is needed to confirm.
+
+CRITICAL grounding:
+- Do NOT report ECSA or Randles-Sevcik values from one CV; those need a scan-rate series (say so).
+- If only one peak is resolved, do not fabricate dEp/E0'.
+- IUPAC sign convention: positive scan + positive current = oxidation (anodic).
+
+(Redox kinetics/diagnostics per Bard, Faulkner & White 3rd ed.)
+Plain ASCII units (V, mV). Return JSON only."""
+
+
+CV_SYSTEM_VI = """Chuyen gia cyclic voltammetry (CV) cho nghien cuu redox va dien hoa xuc tac.
+
+Ban nhan analysis: Epa/Epc, ipa/ipc, dEp_mV, dEp_ideal_mV, E0_prime_V, peak_current_ratio, reversibility, cung conditions va notes.
+
+Cach dien giai (CHI dung gia tri duoc cap; khong bia):
+1. dEp (tach peak): ~59/n mV o 25 C la cap thuan nghich (Nernstian); dEp lon hon hoac phu thuoc scan rate la quasi-/khong thuan nghich. Dien cuc ran thuong 70-80 mV du thuan nghich.
+2. E0' = (Epa+Epc)/2 la the hinh thuc cua cap redox.
+3. peak_current_ratio |ipa/ipc| ~ 1 ho tro tinh thuan nghich hoa hoc.
+4. Tinh thuan nghich tu MOT scan rate la tam thoi: noi ro can phu thuoc scan rate (dEp vs v, ip vs sqrt(v)) de xac nhan.
+
+GROUNDING NGHIEM NGAT:
+- KHONG bao ECSA hoac Randles-Sevcik tu mot CV; can scan-rate series (noi ro).
+- Neu chi co mot peak, khong bia dEp/E0'.
+- Quy uoc dau IUPAC: quet duong + dong duong = oxi hoa (anodic).
+
+(Dong hoc/chan doan redox theo Bard, Faulkner & White 3rd ed.)
+Don vi ASCII (V, mV). Chi tra JSON."""
+
+
+CV_USER_TEMPLATE = """Spectrum metadata:
+- spectrum_type: cv
+- instrument: {instrument}
+- sample_label: {sample_label}
+
+Conditions: {conditions_json}
+
+Parsed data:
+- row_count: {row_count}
+- potential range (V): {x_range}
+
+Analysis: {analysis_json}
+
+Parser notes: {notes_json}
+
+Provide analysis as JSON:
+{{
+  "summary": "<3-sentence narrative in target language>",
+  "redox_assignment": "<localized: the couple, E0'>",
+  "reversibility_interpretation": "<localized>",
+  "kinetics": "<localized: what dEp/ratio imply>",
+  "warnings": ["<localized: single-rate caveat, ECSA needs series, etc.>"],
+  "next_steps": ["<localized: e.g. scan-rate series>"],
+  "overall_confidence": "low|medium|high"
+}}"""
+
+
 # ============================================================
 # Dispatch
 # ============================================================
@@ -480,6 +546,7 @@ SYSTEM_PROMPTS_EN: dict[str, str] = {
     "ocp": OCP_SYSTEM_EN,
     "eis": EIS_SYSTEM_EN,
     "lsv": LSV_SYSTEM_EN,
+    "cv": CV_SYSTEM_EN,
 }
 
 SYSTEM_PROMPTS_VI: dict[str, str] = {
@@ -493,6 +560,7 @@ SYSTEM_PROMPTS_VI: dict[str, str] = {
     "ocp": OCP_SYSTEM_VI,
     "eis": EIS_SYSTEM_VI,
     "lsv": LSV_SYSTEM_VI,
+    "cv": CV_SYSTEM_VI,
 }
 
 
@@ -885,6 +953,14 @@ def build_user_prompt(parsed: dict, metadata: dict) -> str:
     if spectrum_type == "lsv":
         import json as _json
         return LSV_USER_TEMPLATE.format(
+            **common,
+            conditions_json=_json.dumps(parsed.get("conditions") or {}),
+            analysis_json=_json.dumps(parsed.get("analysis") or {}),
+            notes_json=_json.dumps(parsed.get("notes") or []),
+        )
+    if spectrum_type == "cv":
+        import json as _json
+        return CV_USER_TEMPLATE.format(
             **common,
             conditions_json=_json.dumps(parsed.get("conditions") or {}),
             analysis_json=_json.dumps(parsed.get("analysis") or {}),

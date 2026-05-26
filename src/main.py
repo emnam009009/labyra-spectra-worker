@@ -123,6 +123,9 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
     sample_label = metadata.get("sampleLabel") or metadata.get("sample_label")
     chemical_formula = metadata.get("chemicalFormula") or metadata.get("chemical_formula")
     anode = metadata.get("anode")  # X-ray anode: Cu/Mo/Co/Cr/Fe/Ag, default Cu
+    cv_n_electrons = int(metadata.get("nElectrons") or metadata.get("n_electrons") or 1)
+    cv_scan_rate = metadata.get("scanRate") or metadata.get("scan_rate_v_s")
+    cv_area = metadata.get("electrodeArea") or metadata.get("area_cm2")
     lsv_area = metadata.get("electrodeArea") or metadata.get("area_cm2")
     lsv_ref = metadata.get("referenceElectrode") or metadata.get("reference")
     lsv_ph = metadata.get("pH") or metadata.get("ph")
@@ -217,6 +220,13 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
         parser = lambda raw: parse_lsv(
             raw, area_cm2=_a, reference=lsv_ref, ph=_ph,
             reaction=lsv_reaction, ir_corrected=lsv_ir,
+        )
+    elif spectrum_type == "cv":
+        from src.parsers.cv import parse_cv
+        _sr = float(cv_scan_rate) if cv_scan_rate else None
+        _a = float(cv_area) if cv_area else None
+        parser = lambda raw: parse_cv(
+            raw, n_electrons=cv_n_electrons, scan_rate_v_s=_sr, area_cm2=_a,
         )
     else:
         parser = get_parser(spectrum_type)

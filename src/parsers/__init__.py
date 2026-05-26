@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from src.parsers.cv import parse_cv
 from src.parsers.dsc import parse_dsc
 from src.parsers.eis import parse_eis
 from src.parsers.ftir import parse_ftir
@@ -25,6 +26,7 @@ PARSERS: dict[str, Callable[[str], dict[str, Any]]] = {
     "dsc": parse_dsc,
     "ocp": parse_ocp,
     "lsv": parse_lsv,
+    "cv": parse_cv,
     "eis": parse_eis,
 }
 
