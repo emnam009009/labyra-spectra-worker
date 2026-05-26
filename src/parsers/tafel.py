@@ -225,6 +225,7 @@ def parse_tafel(
 
     return {
         "spectrum_curve": downsample_curve(e_raw, j, target_points=500),
+        "tafel_curve": _build_tafel_curve(e_rhe, j, reaction),
         "analysis": analysis,
         "quick_stats": {
             "rowCount": len(e_raw),
@@ -232,4 +233,29 @@ def parse_tafel(
             "current_unit": j_unit,
         },
         "notes": notes,
+    }
+
+
+def _build_tafel_curve(
+    e_rhe: np.ndarray | None, j: np.ndarray, reaction: str | None
+) -> dict[str, list[float]] | None:
+    """The proper Tafel-plot axes: x = log10|j|, y = overpotential (V), restricted
+    to the kinetic branch (eta in the driving direction, |j| > 1 uA). Returned so
+    the app can render a real Tafel plot AND run an instant client-side linear fit
+    over a user-selected window without re-deriving the RHE/density chain.
+    """
+    if e_rhe is None or reaction not in ("her", "oer"):
+        return None
+    eta = (e_rhe - E_OER_EQ_RHE) if reaction == "oer" else (E_HER_EQ_RHE - e_rhe)
+    absj = np.abs(j)
+    mask = (absj > 1e-3) & (eta > 0)
+    if mask.sum() < 5:
+        return None
+    logj = np.log10(absj[mask])
+    y = eta[mask]
+    order = np.argsort(logj)
+    logj, y = logj[order], y[order]
+    return {
+        "x": [float(round(v, 4)) for v in logj.tolist()],
+        "y": [float(round(v, 4)) for v in y.tolist()],
     }
