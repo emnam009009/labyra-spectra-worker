@@ -172,6 +172,23 @@ def parse_lsv(
     elif reaction not in ("her", "oer"):
         notes.append("Reaction type unknown: provide reaction='her' or 'oer' for overpotential benchmarks.")
 
+    # R214: expose the processed Tafel-plot curve (log10|j| vs eta) so the app
+    # can show a Tafel view + client-side range fit directly from an LSV scan,
+    # without requiring a separate Tafel upload.
+    tafel_curve: dict[str, list[float]] | None = None
+    if eta is not None:
+        absj = np.abs(j)
+        mask = (absj > 1e-3) & (eta > 0)
+        if mask.sum() >= 5:
+            lx = np.log10(absj[mask])
+            ly = eta[mask]
+            order = np.argsort(lx)
+            lx, ly = lx[order], ly[order]
+            tafel_curve = {
+                "x": [float(round(v, 4)) for v in lx.tolist()],
+                "y": [float(round(v, 4)) for v in ly.tolist()],
+            }
+
     return {
         "spectrum_type": "lsv",
         "peaks": [],
@@ -179,6 +196,7 @@ def parse_lsv(
         "rhe_curve": (
             downsample_curve(e_rhe, j, target_points=500) if e_rhe is not None else None
         ),
+        "tafel_curve": tafel_curve,
         "analysis": analysis,
         "conditions": {
             "area_cm2": area_cm2,
