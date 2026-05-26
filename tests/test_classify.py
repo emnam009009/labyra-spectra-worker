@@ -59,7 +59,7 @@ def test_taxonomy_subtopic_size() -> None:
 
 def test_taxonomy_versions() -> None:
     assert TAXONOMY_VERSION == "v1"
-    assert PROMPT_VERSION == "v1.0"
+    assert PROMPT_VERSION == "v1.1"
 
 
 # ─── DomainClassification validation (6) ───────────────────────────────
@@ -179,7 +179,7 @@ def test_classify_fallback_has_safe_defaults() -> None:
 
 
 def test_constants() -> None:
-    assert CLASSIFY_INPUT_CHAR_LIMIT == 3000
+    assert CLASSIFY_INPUT_CHAR_LIMIT == 5000
     assert MIN_INPUT_CHARS == 50
 
 

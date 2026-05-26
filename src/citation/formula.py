@@ -51,6 +51,11 @@ def extract_formula_from_label(label: str) -> str | None:
     if not label:
         return None
 
+    # Separators '_' and '-' are not regex word boundaries ('_' is a word
+    # char), so a formula wrapped like '_TiO2_' never matched \b...\b.
+    # Tokenise those separators to spaces first.
+    label = re.sub(r"[_\-]+", " ", label)
+
     # Try common formula patterns
     patterns = [
         # Stoichiometric: 2+ uppercase letters/element
