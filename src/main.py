@@ -602,3 +602,75 @@ async def csie_process(request: Request) -> dict:
     result = run_csie_for_sample(tenant_id, sample_id, force=False)
     return result.to_dict()
 
+
+
+# ============================================================================
+# R261: publication-grade figure export
+# ============================================================================
+
+from fastapi import Response as _Response  # noqa: E402
+from pydantic import BaseModel as _FigBaseModel  # noqa: E402
+
+
+class RenderFigureRequest(_FigBaseModel):
+    """Stateless figure render: app sends curve+peaks, gets back a file.
+
+    No auth/Firestore — the app already authorises and supplies the parsed
+    curve, so this endpoint is a pure data->image transform (like /reference/parse).
+    """
+
+    spectrum_type: str
+    curve: dict[str, list[float]]
+    peaks: list[dict[str, Any]] | None = None
+    publisher: str = "nature"
+    column: str = "single"
+    fmt: str = "pdf"
+    line_color: str = "#1f4e9c"
+    show_peaks: bool = True
+    peak_labels: list[str] | None = None
+    title: str | None = None
+
+
+@app.post("/render-figure")
+async def render_figure(req: RenderFigureRequest) -> _Response:
+    """Render a spectrum to a publication-grade file (PDF/SVG/EPS/PNG/TIFF).
+
+    Dimensions, DPI, fonts, and line weight follow the target publisher's
+    author guidelines (see src/figures/presets.py). Returns the file inline so
+    the app can offer it as a download.
+    """
+    from src.figures.presets import VALID_COLUMNS, VALID_FORMATS
+    from src.figures.render import render_spectrum_figure
+
+    fmt = req.fmt.strip().lower()
+    column = req.column.strip().lower()
+    if fmt not in VALID_FORMATS:
+        raise HTTPException(status_code=400, detail=f"unsupported format: {fmt}")
+    if column not in VALID_COLUMNS:
+        raise HTTPException(status_code=400, detail=f"invalid column: {column}")
+
+    try:
+        data, mime = render_spectrum_figure(
+            spectrum_type=req.spectrum_type,
+            curve=req.curve,
+            peaks=req.peaks,
+            publisher=req.publisher,
+            column=column,
+            fmt=fmt,
+            line_color=req.line_color,
+            show_peaks=req.show_peaks,
+            peak_labels=req.peak_labels,
+            title=req.title,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)[:200]) from exc
+    except Exception as exc:
+        logger.exception("render-figure failed type=%s pub=%s", req.spectrum_type, req.publisher)
+        raise HTTPException(status_code=500, detail=str(exc)[:200]) from exc
+
+    filename = f"figure_{req.spectrum_type}_{req.publisher}_{column}.{fmt}"
+    return _Response(
+        content=data,
+        media_type=mime,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

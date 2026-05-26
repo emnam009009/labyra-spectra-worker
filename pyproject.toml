@@ -32,6 +32,9 @@ dependencies = [
     "scipy>=1.14.0",
     "impedance>=1.7.0",
     "pandas>=2.2.0",
+    # R261: publication-grade figure export
+    "matplotlib>=3.9.0",
+    "pillow>=10.0.0",  # TIFF LZW for figure export
 
     # Spectrum parsers (phase-3b will use XRD subset)
     "pymatgen>=2024.10.3",
