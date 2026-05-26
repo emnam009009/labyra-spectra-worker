@@ -16,6 +16,7 @@ Scientific methods: docs/scientific-methods/eis-analysis.md
 from __future__ import annotations
 
 import logging
+import re
 from io import StringIO
 from typing import Any
 
@@ -31,6 +32,44 @@ R_GAS = 8.314462618      # J/(mol·K)
 F_FARADAY = 96485.332    # C/mol
 
 
+def _autodetect_columns(arr: np.ndarray) -> tuple[int, int, int]:
+    """
+    Pick (freq_col, zre_col, zim_col) from a multi-column table (e.g. ZPlot/Gamry
+    export with Freq, Ampl, Bias, Time, Z', Z'', ...). Heuristic grounded in the
+    physics: Z'' is predominantly negative (capacitive), Z' is the adjacent
+    column before it, freq is the wide-range positive column (default col 0).
+    """
+    ncol = arr.shape[1]
+    # Z'' = column with the largest fraction of negative values (>30%).
+    neg_frac = [float((arr[:, c] < 0).mean()) for c in range(ncol)]
+    zim_col = int(np.argmax(neg_frac))
+    if neg_frac[zim_col] < 0.3:
+        # no clearly-capacitive column → fall back to (0, 1, 2)
+        return 0, 1, 2
+    # Z' = the adjacent column just before Z'' (ZPlot/Gamry/Autolab convention),
+    # provided it is non-constant; otherwise search backward for one.
+    zre_col = zim_col - 1
+    while zre_col > 0 and float(np.std(arr[:, zre_col])) < 1e-9:
+        zre_col -= 1
+    # freq: wide log-range positive column, prefer col 0.
+    freq_col = 0
+    return freq_col, zre_col, zim_col
+
+
+_NUMERIC_START = re.compile(r"^\s*[+-]?(\d|\.\d)")
+
+
+def _strip_header(text: str) -> str:
+    """
+    Keep only numeric data rows. Vendor exports (ZPlot/ZView, Gamry, Autolab)
+    prepend long text headers that are not '#'-commented; a data row starts with
+    a number (optionally signed). Lines failing that test are dropped.
+    """
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    data = [ln for ln in lines if _NUMERIC_START.match(ln)]
+    return "\n".join(data) if data else text
+
+
 def _parse_columns(
     text: str, data_format: str | None = None
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -38,16 +77,16 @@ def _parse_columns(
     Parse EIS into (freq_Hz, Z_real, Z_imag).
 
     Column layouts:
-      data_format='zrezim' (default): freq, Z', Z''
       data_format='polar':            freq, |Z|, phase(deg) -> Z', Z''
+      otherwise (default): rectangular. For exactly 3 columns -> freq, Z', Z''.
+      For >3 columns (ZPlot/Gamry/Autolab exports with Ampl/Bias/Time/GD/Range
+      mixed in) -> columns auto-detected (Z'' = most-negative column, Z' before
+      it, freq = col 0).
 
-    Auto-detection of polar vs rectangular is unreliable (Z'' magnitudes overlap
-    the degree range), so rectangular (Z', Z'') is the default; pass
-    data_format='polar' for magnitude/phase data.
-
-    Z'' is normalised so the capacitive arc is negative (Nyquist plots -Z'' up).
+    Header / comment lines (non-numeric) are skipped automatically. Z'' is
+    normalised so the capacitive arc is negative (Nyquist plots -Z'' up).
     """
-    text = normalize_decimal(text)
+    text = normalize_decimal(_strip_header(text))
     for sep in [",", ";", r"\s+", "\t"]:
         try:
             df = pd.read_csv(
@@ -57,17 +96,18 @@ def _parse_columns(
             df = df.apply(pd.to_numeric, errors="coerce").dropna()
             if df.shape[1] < 3 or len(df) < 8:
                 continue
-            f = df.iloc[:, 0].to_numpy(dtype=float)
-            c1 = df.iloc[:, 1].to_numpy(dtype=float)
-            c2 = df.iloc[:, 2].to_numpy(dtype=float)
-            if (f <= 0).any():
-                continue
+            arr = df.to_numpy(dtype=float)
             if data_format == "polar":
-                z_mod, phase = c1, np.radians(c2)
+                f, z_mod, phase = arr[:, 0], arr[:, 1], np.radians(arr[:, 2])
                 z_real = z_mod * np.cos(phase)
                 z_imag = z_mod * np.sin(phase)
+            elif df.shape[1] == 3:
+                f, z_real, z_imag = arr[:, 0], arr[:, 1], arr[:, 2]
             else:
-                z_real, z_imag = c1, c2
+                fc, zrc, zic = _autodetect_columns(arr)
+                f, z_real, z_imag = arr[:, fc], arr[:, zrc], arr[:, zic]
+            if (f <= 0).any():
+                continue
             # Normalise sign so the capacitive arc is negative.
             if np.nanmean(z_imag) > 0:
                 z_imag = -z_imag
@@ -106,7 +146,8 @@ def _model_free_readout(
     rct = float(round(max(rct_real - rs, 1e-9), 4))
 
     cdl = None
-    if f_apex > 0 and rct > 0:
+    arc_incomplete = bool(apex >= len(fo) - 2)  # apex at lowest-freq end => arc not closed
+    if f_apex > 0 and rct > 0 and not arc_incomplete:
         omega_max = 2 * np.pi * f_apex
         cdl = float(1.0 / (omega_max * rct))
 
@@ -133,6 +174,7 @@ def _model_free_readout(
         "Rct_ohm": rct,
         "Cdl_F": float(round(cdl, 12)) if cdl else None,
         "f_apex_Hz": float(round(f_apex, 4)),
+        "arc_incomplete": arc_incomplete,
         "warburg_detected": warburg,
         "exchange_current_density_A_cm2": float(round(j0, 9)) if j0 else None,
     }
@@ -187,12 +229,23 @@ def parse_eis(
     notes: list[str] = []
     if area_cm2 is None:
         notes.append("Electrode area unknown: exchange current density j0 not computed.")
+    if readout.get("arc_incomplete"):
+        notes.append(
+            "Semicircle not closed within the measured frequency range: Rct is a "
+            "lower bound and Cdl is not estimated. Extend to lower frequency for a "
+            "reliable fit."
+        )
 
     fit_result = None
     if do_fit:
         fit_result = _circuit_fit(f, zr, zi, readout, readout["warburg_detected"])
         if fit_result and "error" in fit_result:
             notes.append(f"Equivalent-circuit fit unavailable: {fit_result['error']}")
+        elif fit_result and fit_result.get("chi_square", 0) > 1.0:
+            notes.append(
+                f"Circuit fit poor (chi-square={fit_result['chi_square']:.2g}); "
+                "parameters unreliable — check data quality / circuit model."
+            )
 
     # Nyquist curve (Z' vs -Z'') for display
     nyquist = {"z_real": [float(round(v, 4)) for v in zr.tolist()],

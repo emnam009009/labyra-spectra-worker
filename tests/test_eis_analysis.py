@@ -109,3 +109,35 @@ def test_circuit_fit_recovers_parameters() -> None:
     assert abs(fit["parameters"]["R0"] - 20.0) < 2.0
     assert abs(fit["parameters"]["R1"] - 100.0) < 5.0
     assert fit["chi_square"] < 0.5
+
+
+# --- incomplete arc (real-data edge case) -----------------------------------
+
+def test_incomplete_arc_flagged() -> None:
+    """
+    A spectrum truncated before the semicircle closes (apex at the lowest
+    frequency) must flag arc_incomplete, withhold Cdl, and note Rct is a bound.
+    """
+    # high-frequency half of a Randles arc only (apex never reached going down)
+    c = CustomCircuit("R0-p(R1,C1)", initial_guess=[5, 2000, 20e-6])
+    f = np.logspace(5, 1, 40)  # stops at 10 Hz, above the ~4 Hz apex
+    z = c.predict(f, use_initial=True)
+    text = "\n".join(f"{fi:.6g},{zr:.6f},{zi:.6f}" for fi, zr, zi in zip(f, z.real, z.imag, strict=False))
+    r = parse_eis(text, do_fit=False)
+    assert r["model_free"]["arc_incomplete"] is True
+    assert r["model_free"]["Cdl_F"] is None
+    assert any("not closed" in n.lower() or "lower bound" in n.lower() for n in r["notes"])
+
+
+def test_multicolumn_autodetect() -> None:
+    """ZPlot/Gamry-style >3-column rows: Z'' is the negative column, Z' precedes it."""
+    c = CustomCircuit("R0-p(R1,C1)", initial_guess=[20, 100, 25e-6])
+    f = np.logspace(5, -2, 60)
+    z = c.predict(f, use_initial=True)
+    # columns: freq, Ampl(0.01), Bias(0), Time, Z', Z'', GD(0), Err(0), Range
+    rows = []
+    for i, (fi, zr, zi) in enumerate(zip(f, z.real, z.imag, strict=False)):
+        rows.append(f"{fi:.6g}\t0.01\t0\t{i * 0.5:.3f}\t{zr:.6f}\t{zi:.6f}\t0\t0\t3")
+    r = parse_eis("\n".join(rows), do_fit=False)
+    assert abs(r["model_free"]["Rs_ohm"] - 20.0) < 1.0
+    assert abs(r["model_free"]["Rct_ohm"] - 100.0) < 5.0
