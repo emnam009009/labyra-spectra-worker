@@ -414,6 +414,8 @@ CRITICAL grounding:
 - Geometric activity can be inflated by surface area (ECSA), not intrinsic activity.
 - Do not fabricate overpotential/Tafel if the fields are missing.
 
+Benchmark reference values (BENCHMARK_R255; McCrory 2013/2015): in alkaline media non-noble OER catalysts typically reach 10 mA/cm2 at eta 0.30-0.43 V (IrOx ~0.32 V); good HER catalysts operate at |eta| <~0.1 V (Pt/NiMo ~0.04-0.05 V). A scaling-relation thermodynamic floor of ~0.3 V applies to OER on planar oxides, so a reported OER eta < 0.3 V is suspicious (check iR correction / data). A Tafel slope near 118-120 mV/dec corresponds to a rate-limiting Volmer step (alpha~0.5, 25 C; Bard 3rd ed.); smaller slopes indicate faster kinetics.
+
 (Electrode kinetics per Butler-Volmer/Tafel: Bard, Faulkner & White 3rd ed.)
 Plain ASCII units (V, mV/dec, mA/cm2). Return JSON only."""
 
@@ -432,6 +434,8 @@ GROUNDING NGHIEM NGAT:
 - Neu chua iR-correct (xem notes): noi ro overpotential va Tafel slope bi phong dai.
 - Hoat tinh hinh hoc co the bi thoi phong boi dien tich be mat (ECSA), khong phai hoat tinh noi tai.
 - Khong bia overpotential/Tafel neu thieu truong.
+
+Gia tri benchmark tham chieu (McCrory 2013/2015): trong moi truong kiem, xuc tac OER kim loai khong quy thuong dat 10 mA/cm2 o eta 0.30-0.43 V (IrOx ~0.32 V); xuc tac HER tot hoat dong o |eta| <~0.1 V (Pt/NiMo ~0.04-0.05 V). Co san nhiet dong ~0.3 V (scaling relation) cho OER tren oxit phang, nen OER eta < 0.3 V la dang ngo (kiem iR / data). Tafel slope ~118-120 mV/dec ung voi buoc Volmer gioi han toc do (alpha~0.5, 25 C; Bard 3rd ed.); slope nho hon = dong hoc nhanh hon.
 
 (Dong hoc dien cuc theo Butler-Volmer/Tafel: Bard, Faulkner & White 3rd ed.)
 Don vi ASCII (V, mV/dec, mA/cm2). Chi tra JSON."""
@@ -481,6 +485,8 @@ CRITICAL grounding:
 - If only one peak is resolved, do not fabricate dEp/E0'.
 - IUPAC sign convention: positive scan + positive current = oxidation (anodic).
 
+ECSA note (McCrory): if a scan-rate series is available, the double-layer capacitance is the slope of charging current vs scan rate (i_c = v*Cdl, measured in a non-Faradaic ~0.1 V window around OCP), and ECSA = Cdl/Cs with Cs ~ 0.035 mF/cm2 (acid) or 0.040 mF/cm2 (alkaline). From a single CV, do not compute ECSA.
+
 (Redox kinetics/diagnostics per Bard, Faulkner & White 3rd ed.)
 Plain ASCII units (V, mV). Return JSON only."""
 
@@ -499,6 +505,8 @@ GROUNDING NGHIEM NGAT:
 - KHONG bao ECSA hoac Randles-Sevcik tu mot CV; can scan-rate series (noi ro).
 - Neu chi co mot peak, khong bia dEp/E0'.
 - Quy uoc dau IUPAC: quet duong + dong duong = oxi hoa (anodic).
+
+Ghi chu ECSA (McCrory): neu co scan-rate series, dien dung lop kep la slope cua dong nap theo scan rate (i_c = v*Cdl, do trong cua so ~0.1 V khong Faraday quanh OCP), va ECSA = Cdl/Cs voi Cs ~ 0.035 mF/cm2 (axit) hoac 0.040 mF/cm2 (kiem). Tu mot CV don le, khong tinh ECSA.
 
 (Dong hoc/chan doan redox theo Bard, Faulkner & White 3rd ed.)
 Don vi ASCII (V, mV). Chi tra JSON."""
