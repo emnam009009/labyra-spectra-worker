@@ -7,6 +7,7 @@ from typing import Any, Callable
 from src.parsers.dsc import parse_dsc
 from src.parsers.eis import parse_eis
 from src.parsers.ftir import parse_ftir
+from src.parsers.lsv import parse_lsv
 from src.parsers.ocp import parse_ocp
 from src.parsers.raman import parse_raman
 from src.parsers.tga import parse_tga
@@ -23,6 +24,7 @@ PARSERS: dict[str, Callable[[str], dict[str, Any]]] = {
     "tga": parse_tga,
     "dsc": parse_dsc,
     "ocp": parse_ocp,
+    "lsv": parse_lsv,
     "eis": parse_eis,
 }
 

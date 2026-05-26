@@ -398,6 +398,73 @@ Provide analysis as JSON:
 }}"""
 
 
+
+LSV_SYSTEM_EN = """You are an expert in linear sweep voltammetry (LSV) for HER/OER electrocatalysis (water splitting, hydrogen).
+
+You receive an analysis with current_density_unit, and (when conditions allow) overpotential_at_10mA_cm2_V, onset_overpotential_at_1mA_cm2_V, tafel (slope mV/dec + r2), plus conditions and notes.
+
+How to interpret (use ONLY the values given; do not invent):
+1. Overpotential at 10 mA/cm2 (geometric) is the standard activity benchmark; lower = more active. ~the current of a 10%-efficient solar water-splitting device.
+2. Onset overpotential (1 mA/cm2) marks where catalysis begins.
+3. Tafel slope (mV/dec) reflects kinetics/mechanism (e.g. HER on Pt ~30 mV/dec); only trust it when r2 is high.
+4. Overpotential needs the RHE scale: it is computed only if reference electrode and pH were given. If eta fields are absent, say they cannot be computed and why.
+
+CRITICAL grounding:
+- If not iR-corrected (see notes), state overpotential and Tafel slope are overestimated.
+- Geometric activity can be inflated by surface area (ECSA), not intrinsic activity.
+- Do not fabricate overpotential/Tafel if the fields are missing.
+
+(Electrode kinetics per Butler-Volmer/Tafel: Bard, Faulkner & White 3rd ed.)
+Plain ASCII units (V, mV/dec, mA/cm2). Return JSON only."""
+
+
+LSV_SYSTEM_VI = """Chuyen gia LSV (linear sweep voltammetry) cho dien hoa xuc tac HER/OER (tach nuoc, hydro).
+
+Ban nhan analysis: current_density_unit, va (khi du dieu kien) overpotential_at_10mA_cm2_V, onset_overpotential_at_1mA_cm2_V, tafel (slope mV/dec + r2), cung conditions va notes.
+
+Cach dien giai (CHI dung gia tri duoc cap; khong bia):
+1. Overpotential tai 10 mA/cm2 (hinh hoc) la benchmark hoat tinh chuan; cang thap cang hoat dong manh.
+2. Onset overpotential (1 mA/cm2) danh dau noi bat dau xuc tac.
+3. Tafel slope (mV/dec) phan anh dong hoc/co che (HER tren Pt ~30 mV/dec); chi tin khi r2 cao.
+4. Overpotential can thang do RHE: chi tinh duoc neu co reference electrode va pH. Neu thieu truong eta, noi ro khong tinh duoc va vi sao.
+
+GROUNDING NGHIEM NGAT:
+- Neu chua iR-correct (xem notes): noi ro overpotential va Tafel slope bi phong dai.
+- Hoat tinh hinh hoc co the bi thoi phong boi dien tich be mat (ECSA), khong phai hoat tinh noi tai.
+- Khong bia overpotential/Tafel neu thieu truong.
+
+(Dong hoc dien cuc theo Butler-Volmer/Tafel: Bard, Faulkner & White 3rd ed.)
+Don vi ASCII (V, mV/dec, mA/cm2). Chi tra JSON."""
+
+
+LSV_USER_TEMPLATE = """Spectrum metadata:
+- spectrum_type: lsv
+- instrument: {instrument}
+- sample_label: {sample_label}
+
+Conditions: {conditions_json}
+
+Parsed data:
+- row_count: {row_count}
+- potential range (V): {x_range}
+
+Analysis: {analysis_json}
+
+Parser notes: {notes_json}
+
+Provide analysis as JSON:
+{{
+  "summary": "<3-sentence narrative in target language>",
+  "activity_assessment": "<localized: overpotential vs typical catalysts>",
+  "kinetics": "<localized: Tafel slope interpretation>",
+  "onset_interpretation": "<localized>",
+  "fit_reliability": "<localized: is Tafel fit trustworthy>",
+  "warnings": ["<localized: iR, ECSA, reference/pH if missing>"],
+  "next_steps": ["<localized>"],
+  "overall_confidence": "low|medium|high"
+}}"""
+
+
 # ============================================================
 # Dispatch
 # ============================================================
@@ -412,6 +479,7 @@ SYSTEM_PROMPTS_EN: dict[str, str] = {
     "dsc": DSC_SYSTEM_EN,
     "ocp": OCP_SYSTEM_EN,
     "eis": EIS_SYSTEM_EN,
+    "lsv": LSV_SYSTEM_EN,
 }
 
 SYSTEM_PROMPTS_VI: dict[str, str] = {
@@ -424,6 +492,7 @@ SYSTEM_PROMPTS_VI: dict[str, str] = {
     "dsc": DSC_SYSTEM_VI,
     "ocp": OCP_SYSTEM_VI,
     "eis": EIS_SYSTEM_VI,
+    "lsv": LSV_SYSTEM_VI,
 }
 
 
@@ -811,6 +880,14 @@ def build_user_prompt(parsed: dict, metadata: dict) -> str:
             conditions_json=_json.dumps(parsed.get("conditions") or {}),
             model_free_json=_json.dumps(parsed.get("model_free") or {}),
             circuit_fit_json=_json.dumps(parsed.get("circuit_fit") or {})[:3000],
+            notes_json=_json.dumps(parsed.get("notes") or []),
+        )
+    if spectrum_type == "lsv":
+        import json as _json
+        return LSV_USER_TEMPLATE.format(
+            **common,
+            conditions_json=_json.dumps(parsed.get("conditions") or {}),
+            analysis_json=_json.dumps(parsed.get("analysis") or {}),
             notes_json=_json.dumps(parsed.get("notes") or []),
         )
     raise ValueError(f"No template for: {spectrum_type}")

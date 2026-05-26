@@ -123,6 +123,11 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
     sample_label = metadata.get("sampleLabel") or metadata.get("sample_label")
     chemical_formula = metadata.get("chemicalFormula") or metadata.get("chemical_formula")
     anode = metadata.get("anode")  # X-ray anode: Cu/Mo/Co/Cr/Fe/Ag, default Cu
+    lsv_area = metadata.get("electrodeArea") or metadata.get("area_cm2")
+    lsv_ref = metadata.get("referenceElectrode") or metadata.get("reference")
+    lsv_ph = metadata.get("pH") or metadata.get("ph")
+    lsv_reaction = metadata.get("reaction")  # her | oer
+    lsv_ir = bool(metadata.get("irCorrected") or metadata.get("ir_corrected"))
     eis_area = metadata.get("electrodeArea") or metadata.get("area_cm2")
     eis_n = int(metadata.get("nElectrons") or metadata.get("n_electrons") or 1)
     eis_temp = float(metadata.get("temperatureK") or metadata.get("temperature_k") or 298.15)
@@ -204,6 +209,14 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
         parser = lambda raw: parse_eis(
             raw, area_cm2=_area, n_electrons=eis_n,
             temperature_k=eis_temp, data_format=eis_format,
+        )
+    elif spectrum_type == "lsv":
+        from src.parsers.lsv import parse_lsv
+        _a = float(lsv_area) if lsv_area else None
+        _ph = float(lsv_ph) if lsv_ph is not None else None
+        parser = lambda raw: parse_lsv(
+            raw, area_cm2=_a, reference=lsv_ref, ph=_ph,
+            reaction=lsv_reaction, ir_corrected=lsv_ir,
         )
     else:
         parser = get_parser(spectrum_type)
