@@ -12,6 +12,7 @@ from src.parsers.ftir import parse_ftir
 from src.parsers.lsv import parse_lsv
 from src.parsers.ocp import parse_ocp
 from src.parsers.raman import parse_raman
+from src.parsers.tafel import parse_tafel
 from src.parsers.tga import parse_tga
 from src.parsers.uvvis import parse_uvvis
 from src.parsers.uvvis_drs import parse_uvvis_drs
@@ -28,6 +29,7 @@ PARSERS: dict[str, Callable[[str], dict[str, Any]]] = {
     "ocp": parse_ocp,
     "lsv": parse_lsv,
     "cv": parse_cv,
+    "tafel": parse_tafel,
     "eis": parse_eis,
 }
 

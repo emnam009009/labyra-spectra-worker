@@ -228,6 +228,13 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
         parser = lambda raw: parse_cv(
             raw, n_electrons=cv_n_electrons, scan_rate_v_s=_sr, area_cm2=_a,
         )
+    elif spectrum_type == "tafel":
+        from src.parsers.tafel import parse_tafel
+        _a = float(lsv_area) if lsv_area else None
+        _ph = float(lsv_ph) if lsv_ph is not None else None
+        parser = lambda raw: parse_tafel(
+            raw, reference=lsv_ref, ph=_ph, area_cm2=_a, reaction=lsv_reaction,
+        )
     else:
         parser = get_parser(spectrum_type)
 

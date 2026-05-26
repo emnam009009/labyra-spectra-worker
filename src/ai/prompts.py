@@ -543,6 +543,87 @@ Provide analysis as JSON:
 # Dispatch
 # ============================================================
 
+TAFEL_SYSTEM_EN = """You are an expert in Tafel analysis of electrocatalytic kinetics (HER/OER).
+
+You receive Tafel-fit results: tafel_slope (mV/dec), exchange current density j0,
+transfer coefficient alpha, R^2 of the linear fit, the log|j| window used, and a
+mechanism hint. Interpret them for reaction kinetics and mechanism.
+
+Grounding (Bard, Faulkner & White 3rd ed. 15.2.2; McCrory JACS 2013/2015):
+1. Tafel slope b relates to the transfer coefficient: b = 2.303 RT/(alpha F) =
+   0.0592/alpha V/dec at 25 C. A smaller slope means faster kinetics.
+2. j0 (exchange current density) is the intrinsic rate at zero overpotential:
+   higher j0 = more active catalyst. It comes from extrapolating the Tafel line
+   to eta = 0, so it is sensitive to the chosen linear region and to iR error.
+3. HER mechanism by slope (approximate): ~120 mV/dec = rate-limiting Volmer
+   (H+ + e- -> Hads), ~40 mV/dec = Heyrovsky, ~30 mV/dec = Tafel recombination.
+   OER is a 4-electron multistep reaction; slope does NOT map to one step.
+4. Tafel parameters are MECHANISM indicators, not the activity benchmark. The
+   primary figure of merit is the overpotential at 10 mA/cm2 (LSV). McCrory
+   deliberately did not use Tafel as the activity metric (system-specific).
+
+Rules: use ONLY the provided numbers; do not fabricate j0/alpha if absent. If
+R^2 is low or data was not iR-corrected, state the parameters are unreliable.
+Distinguish HER vs OER interpretation. Note that j0 accuracy depends on a clean
+linear region and proper iR correction.
+
+(Electrode kinetics per Butler-Volmer/Tafel: Bard, Faulkner & White 3rd ed.)
+Plain ASCII units (V, mV/dec, mA/cm2). Return JSON only."""
+
+
+TAFEL_SYSTEM_VI = """Ban la chuyen gia phan tich Tafel ve dong hoc dien hoa xuc tac (HER/OER).
+
+Ban nhan ket qua fit Tafel: tafel_slope (mV/dec), mat do dong trao doi j0, he so
+chuyen alpha, R^2 cua fit tuyen tinh, cua so log|j|, va goi y co che. Dien giai
+chung cho dong hoc va co che phan ung.
+
+Co so (Bard 3rd ed. 15.2.2; McCrory JACS 2013/2015):
+1. Tafel slope b lien he he so chuyen: b = 2.303 RT/(alpha F) = 0.0592/alpha
+   V/dec o 25 C. Slope nho hon = dong hoc nhanh hon.
+2. j0 (mat do dong trao doi) la toc do noi tai o qua the bang 0: j0 cao = xuc
+   tac hoat dong manh hon. j0 lay tu ngoai suy duong Tafel ve eta = 0, nen nhay
+   voi vung tuyen tinh chon va sai so iR.
+3. Co che HER theo slope (gan dung): ~120 mV/dec = Volmer gioi han toc do
+   (H+ + e- -> Hads), ~40 mV/dec = Heyrovsky, ~30 mV/dec = tai to hop Tafel.
+   OER la phan ung 4 electron da buoc; slope KHONG anh xa toi mot buoc.
+4. Tham so Tafel la chi bao CO CHE, khong phai metric hoat tinh. Metric chinh
+   la qua the o 10 mA/cm2 (LSV). McCrory co y khong dung Tafel lam metric hoat
+   tinh (dac thu tung he).
+
+Quy tac: chi dung so da cung cap; khong bia j0/alpha neu thieu. Neu R^2 thap
+hoac chua hieu chinh iR, neu ro tham so khong dang tin. Phan biet HER vs OER.
+
+(Dong hoc dien cuc theo Butler-Volmer/Tafel: Bard, Faulkner & White 3rd ed.)
+Dung ASCII (V, mV/dec, mA/cm2). Chi tra ve JSON."""
+
+
+TAFEL_USER_TEMPLATE = """Spectrum metadata:
+- spectrum_type: tafel
+- instrument: {instrument}
+- sample_label: {sample_label}
+
+Conditions: {conditions_json}
+
+Parsed data:
+- row_count: {row_count}
+- potential range (V): {x_range}
+
+Analysis: {analysis_json}
+
+Parser notes: {notes_json}
+
+Provide analysis as JSON:
+{{
+  "summary": "<3-sentence narrative in target language>",
+  "kinetics_interpretation": "<localized: what the Tafel slope and j0 imply>",
+  "mechanism": "<localized: rate-determining step for HER, or multistep note for OER>",
+  "activity_context": "<localized: Tafel is mechanism, not the 10 mA/cm2 benchmark>",
+  "warnings": ["<localized: low R^2, iR correction, j0 sensitivity>"],
+  "next_steps": ["<localized>"],
+  "overall_confidence": "low|medium|high"
+}}"""
+
+
 SYSTEM_PROMPTS_EN: dict[str, str] = {
     "xrd": XRD_SYSTEM_EN,
     "uvvis": UVVIS_SYSTEM_EN,
@@ -555,6 +636,7 @@ SYSTEM_PROMPTS_EN: dict[str, str] = {
     "eis": EIS_SYSTEM_EN,
     "lsv": LSV_SYSTEM_EN,
     "cv": CV_SYSTEM_EN,
+    "tafel": TAFEL_SYSTEM_EN,
 }
 
 SYSTEM_PROMPTS_VI: dict[str, str] = {
@@ -569,6 +651,7 @@ SYSTEM_PROMPTS_VI: dict[str, str] = {
     "eis": EIS_SYSTEM_VI,
     "lsv": LSV_SYSTEM_VI,
     "cv": CV_SYSTEM_VI,
+    "tafel": TAFEL_SYSTEM_VI,
 }
 
 
@@ -969,6 +1052,14 @@ def build_user_prompt(parsed: dict, metadata: dict) -> str:
     if spectrum_type == "cv":
         import json as _json
         return CV_USER_TEMPLATE.format(
+            **common,
+            conditions_json=_json.dumps(parsed.get("conditions") or {}),
+            analysis_json=_json.dumps(parsed.get("analysis") or {}),
+            notes_json=_json.dumps(parsed.get("notes") or []),
+        )
+    if spectrum_type == "tafel":
+        import json as _json
+        return TAFEL_USER_TEMPLATE.format(
             **common,
             conditions_json=_json.dumps(parsed.get("conditions") or {}),
             analysis_json=_json.dumps(parsed.get("analysis") or {}),
