@@ -309,6 +309,81 @@ Nhiệm vụ:
 CRITICAL: Plain ASCII units. Chỉ trả JSON."""
 
 
+
+EIS_SYSTEM_EN = """You are an expert in Electrochemical Impedance Spectroscopy (EIS) for materials and electrocatalysis (water splitting, HER/OER, photoelectrodes).
+
+You receive a model-free readout (Rs, Rct, Cdl, f_apex, warburg_detected, arc_incomplete, exchange_current_density) and, when available, an equivalent-circuit fit (Randles R0-p(R1,CPE1)[-W1] with parameters and chi_square), plus notes.
+
+How to interpret a Nyquist spectrum (do not invent values beyond those given):
+1. Rs (high-frequency real-axis intercept) = solution/series resistance (electrolyte + contacts).
+2. Rct (semicircle diameter) = charge-transfer resistance; smaller Rct = faster interfacial kinetics.
+3. Cdl from the apex (omega_max = 1/(Rct*Cdl)) = double-layer capacitance; large effective Cdl can indicate high active surface area (or pseudocapacitance).
+4. CPE (constant-phase element) replaces an ideal capacitor; exponent n<1 reflects surface heterogeneity/roughness.
+5. Warburg (45-degree low-frequency tail) = diffusion/mass-transport control.
+6. j0 = R*T/(n*F*Rct*A) = exchange current density; higher j0 = more active electrocatalyst.
+
+CRITICAL grounding rules:
+- Use ONLY the numbers provided. Do NOT fabricate Rct/Cdl/j0 if they are null.
+- If arc_incomplete is true: state that Rct is a LOWER BOUND and Cdl is unavailable because the semicircle did not close; recommend extending to lower frequency (mHz).
+- If the circuit fit chi_square is high (>1) or the fit reports an error: treat fit parameters as unreliable and say so; prefer the model-free readout.
+- Distinguish what is measured (Rs/Rct) from what is inferred (kinetics, surface area).
+
+Plain ASCII units (Ohm, F, A/cm2, Hz). Return JSON only."""
+
+
+EIS_SYSTEM_VI = """Chuyen gia EIS (Electrochemical Impedance Spectroscopy) cho vat lieu va dien hoa xuc tac (tach nuoc, HER/OER, dien cuc quang).
+
+Ban nhan model-free readout (Rs, Rct, Cdl, f_apex, warburg_detected, arc_incomplete, exchange_current_density) va, neu co, equivalent-circuit fit (Randles R0-p(R1,CPE1)[-W1] kem parameters + chi_square), cung notes.
+
+Cach dien giai Nyquist (KHONG bia gia tri ngoai du lieu duoc cung cap):
+1. Rs (giao truc thuc tan cao) = dien tro dung dich/noi tiep (chat dien ly + tiep xuc).
+2. Rct (duong kinh ban nguyet) = dien tro chuyen dien tich; Rct nho = dong hoc be mat nhanh.
+3. Cdl tu dinh (omega_max = 1/(Rct*Cdl)) = dien dung lop kep; Cdl lon co the chi dien tich be mat hoat dong cao (hoac pseudocapacitance).
+4. CPE thay tu ly tuong; so mu n<1 phan anh be mat khong dong nhat/nham.
+5. Warburg (duoi 45 do tan thap) = kiem soat khuech tan/van chuyen khoi.
+6. j0 = R*T/(n*F*Rct*A) = mat do dong trao doi; j0 cao = xuc tac dien hoat dong manh hon.
+
+QUY TAC grounding NGHIEM NGAT:
+- CHI dung cac so duoc cung cap. KHONG bia Rct/Cdl/j0 neu null.
+- Neu arc_incomplete = true: noi ro Rct la CHAN DUOI va Cdl khong co vi ban nguyet chua dong; de xuat quet xuong tan thap hon (mHz).
+- Neu circuit fit chi_square cao (>1) hoac fit bao error: coi tham so fit khong dang tin va noi ro; uu tien model-free readout.
+- Phan biet cai DO DUOC (Rs/Rct) voi cai SUY LUAN (dong hoc, dien tich be mat).
+
+Don vi ASCII (Ohm, F, A/cm2, Hz). Chi tra JSON."""
+
+
+EIS_USER_TEMPLATE = """Spectrum metadata:
+- spectrum_type: eis
+- instrument: {instrument}
+- sample_label: {sample_label}
+
+Measurement conditions: {conditions_json}
+
+Parsed data:
+- row_count: {row_count}
+- frequency range (Hz): {x_range}
+
+Model-free readout: {model_free_json}
+
+Equivalent-circuit fit: {circuit_fit_json}
+
+Parser notes: {notes_json}
+
+Provide analysis as JSON:
+{{
+  "summary": "<3-sentence narrative in target language>",
+  "rs_interpretation": "<localized>",
+  "rct_interpretation": "<localized>",
+  "capacitance_interpretation": "<localized>",
+  "mass_transport": "<localized: Warburg/diffusion if present, else none>",
+  "kinetics": "<localized: j0 / electrocatalytic activity if computable>",
+  "fit_reliability": "<localized: reliable | unreliable, with reason>",
+  "warnings": ["<localized>"],
+  "next_steps": ["<localized>"],
+  "overall_confidence": "low|medium|high"
+}}"""
+
+
 # ============================================================
 # Dispatch
 # ============================================================
@@ -322,6 +397,7 @@ SYSTEM_PROMPTS_EN: dict[str, str] = {
     "tga": TGA_SYSTEM_EN,
     "dsc": DSC_SYSTEM_EN,
     "ocp": OCP_SYSTEM_EN,
+    "eis": EIS_SYSTEM_EN,
 }
 
 SYSTEM_PROMPTS_VI: dict[str, str] = {
@@ -333,6 +409,7 @@ SYSTEM_PROMPTS_VI: dict[str, str] = {
     "tga": TGA_SYSTEM_VI,
     "dsc": DSC_SYSTEM_VI,
     "ocp": OCP_SYSTEM_VI,
+    "eis": EIS_SYSTEM_VI,
 }
 
 
@@ -691,5 +768,14 @@ def build_user_prompt(parsed: dict, metadata: dict) -> str:
             **common,
             duration_s=parsed.get("duration_s", "?"),
             eq_json=parsed.get("equilibrium") or "{}",
+        )
+    if spectrum_type == "eis":
+        import json as _json
+        return EIS_USER_TEMPLATE.format(
+            **common,
+            conditions_json=_json.dumps(parsed.get("conditions") or {}),
+            model_free_json=_json.dumps(parsed.get("model_free") or {}),
+            circuit_fit_json=_json.dumps(parsed.get("circuit_fit") or {})[:3000],
+            notes_json=_json.dumps(parsed.get("notes") or []),
         )
     raise ValueError(f"No template for: {spectrum_type}")
