@@ -40,6 +40,8 @@ credentials*.json
 # Local data
 data/
 *.xy
+!tests/fixtures/
+!tests/fixtures/**
 *.csv.bak
 spectra_samples/
 
