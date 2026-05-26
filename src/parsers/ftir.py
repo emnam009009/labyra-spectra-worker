@@ -1,4 +1,12 @@
-"""FTIR parser with spectrum curve."""
+"""FTIR parser with spectrum curve and sampling-mode awareness.
+
+Upgraded (R249): simple ATR correction (penetration depth proportional to 1/wavenumber),
+linear baseline subtraction for peak absorbance, and atmospheric-band flagging
+(CO2 / H2O). Vendor header stripping (PerkinElmer, JCAMP-DX) and T↔A conversion
+retained.
+
+Scientific methods: docs/scientific-methods/ftir-analysis.md
+"""
 
 from __future__ import annotations
 
@@ -14,56 +22,47 @@ from src.parsers._utils import downsample_curve, normalize_decimal
 
 logger = logging.getLogger(__name__)
 
+# Atmospheric interference windows (cm-1): CO2 asymmetric stretch + bend, and
+# water vapour rotational/bending envelopes. Peaks here may be artefacts.
+ATMOSPHERIC_BANDS = [
+    {"range": (2300, 2380), "species": "CO2", "note": "atmospheric CO2 asymmetric stretch (~2349)"},
+    {"range": (660, 670), "species": "CO2", "note": "atmospheric CO2 bend (~667)"},
+    {"range": (3500, 3950), "species": "H2O", "note": "water-vapour stretch/rotational"},
+    {"range": (1300, 1680), "species": "H2O", "note": "water-vapour bending (may overlap real bands)"},
+]
+
+ATR_REFERENCE_WAVENUMBER = 1000.0  # normalisation point for simple ATR correction
+
 
 def _strip_pe_header(text: str) -> str:
-    """Strip PerkinElmer Spectrum ASCII header.
-
-    PE format: magic line "PE IR" + ~25 header lines + "#DATA" marker
-    + tab-separated wavenumber<TAB>%T data rows.
-
-    Returns text starting from first data row. If not PE format, returns
-    original text unchanged.
-
-    @phase R163-worker-ftir-pe
-    """
+    """Strip PerkinElmer Spectrum ASCII header (magic 'PE IR' + '#DATA' marker)."""
     if not text.startswith("PE IR"):
         return text
-    # Find #DATA marker (case-sensitive per PE spec)
     data_idx = text.find("#DATA")
     if data_idx == -1:
-        return text  # malformed, let parser try anyway
-    # Skip "#DATA\n" or "#DATA\r\n"
-    after_marker = text[data_idx + len("#DATA"):]
-    # Strip leading newlines/whitespace
-    return after_marker.lstrip()
+        return text
+    return text[data_idx + len("#DATA"):].lstrip()
 
 
 def _strip_jcamp_header(text: str) -> str:
-    """Strip JCAMP-DX header (lines starting with ##).
-
-    JCAMP-DX is the IUPAC standard for spectral data. Header lines start
-    with ##LABEL=value. Data section starts after ##XYDATA= or ##PEAK TABLE=.
-
-    @phase R163-worker-ftir-jcamp
-    """
+    """Strip JCAMP-DX header (lines starting with ##); data after ##XYDATA= etc."""
     if not text.lstrip().startswith("##"):
         return text
     lines = text.split("\n")
     data_start = -1
     for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith("##XYDATA=") or stripped.startswith("##PEAK TABLE=") or stripped.startswith("##XYPOINTS="):
+        s = line.strip()
+        if s.startswith("##XYDATA=") or s.startswith("##PEAK TABLE=") or s.startswith("##XYPOINTS="):
             data_start = i + 1
             break
     if data_start == -1:
         return text
-    # Filter out trailing ##END= and any remaining ## lines
-    data_lines = [l for l in lines[data_start:] if not l.strip().startswith("##")]
+    data_lines = [ln for ln in lines[data_start:] if not ln.strip().startswith("##")]
     return "\n".join(data_lines)
 
 
 def _parse_two_column(text: str) -> tuple[np.ndarray, np.ndarray]:
-    text = normalize_decimal(text)  # B4: EU decimal comma -> dot (no-op for US/dot)
+    text = normalize_decimal(text)  # EU decimal comma -> dot
     for sep in [",", ";", r"\s+", "\t"]:
         try:
             df = pd.read_csv(
@@ -76,7 +75,7 @@ def _parse_two_column(text: str) -> tuple[np.ndarray, np.ndarray]:
                 y = df.iloc[:, 1].to_numpy(dtype=float)
                 if 300 < x.min() < 5000 and x.max() < 5000:
                     return x, y
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
     raise ValueError("Could not parse two-column FTIR data")
 
@@ -97,32 +96,49 @@ def _to_absorbance(y: np.ndarray, mode: str) -> np.ndarray:
     return y
 
 
+def _atr_correct(x: np.ndarray, y_abs: np.ndarray) -> np.ndarray:
+    """
+    Simple ATR correction (first approximation): penetration depth dp proportional to 1/wavenumber, so
+    ATR over-weights low wavenumbers vs transmission. Multiply by wavenumber to compensate
+    (normalised at 1000 cm⁻¹). Corrects penetration-depth scaling ONLY — it does
+    NOT remove the anomalous-dispersion red-shift/band-shape change (that needs an
+    advanced correction with the sample refractive index + Kramers-Kronig).
+    Ref: Anton Paar ATR wiki; ScienceDirect ATR overview.
+    """
+    return y_abs * (x / ATR_REFERENCE_WAVENUMBER)
+
+
+def _linear_baseline(y: np.ndarray) -> np.ndarray:
+    """Subtract a straight baseline between the two spectrum ends."""
+    n = len(y)
+    if n < 2:
+        return y
+    baseline = np.linspace(y[0], y[-1], n)
+    return y - baseline
+
+
 def _detect_peaks(x: np.ndarray, y_abs: np.ndarray, *, max_peaks: int = 30) -> list[dict[str, float]]:
-    # R165-phase-3-ftir-fwhm: PerkinElmer ASC files have descending x (4000 → 400 cm⁻¹).
-    # find_peaks expects monotonic-positive-step data; reverse if descending so
-    # dx > 0 and FWHM stays positive. y_abs reindexed to match.
+    # PerkinElmer ASC files have descending x (4000 -> 400). Sort ascending so
+    # dx > 0 and FWHM stays positive.
     if len(x) > 1 and x[1] < x[0]:
         x = x[::-1].copy()
         y_abs = y_abs[::-1].copy()
 
-    if len(y_abs) >= 21:
-        y_smooth = savgol_filter(y_abs, window_length=11, polyorder=3)
-    else:
-        y_smooth = y_abs
-    prominence = (y_smooth.max() - y_smooth.min()) * 0.03
-    peak_idx, props = find_peaks(y_smooth, prominence=prominence, distance=5, width=2)
+    y_smooth = savgol_filter(y_abs, window_length=11, polyorder=3) if len(y_abs) >= 21 else y_abs
+    y_bc = _linear_baseline(y_smooth)  # baseline-subtracted for peak heights
+    prominence = (y_bc.max() - y_bc.min()) * 0.03
+    peak_idx, props = find_peaks(y_bc, prominence=prominence, distance=5, width=2)
     if len(peak_idx) > max_peaks:
-        top = np.argsort(y_smooth[peak_idx])[-max_peaks:]
+        top = np.argsort(y_bc[peak_idx])[-max_peaks:]
         peak_idx = peak_idx[np.sort(top)]
         props = {k: v[np.sort(top)] for k, v in props.items()}
     peaks = []
     widths = props.get("widths", np.zeros(len(peak_idx)))
+    dx = abs(float(x[1] - x[0])) if len(x) > 1 else 0.0
     for i, idx in enumerate(peak_idx):
-        # R165-phase-3-ftir-fwhm: abs() — defense even though we now sort ascending above
-        dx = abs(float(x[1] - x[0])) if len(x) > 1 else 0.0
         peaks.append({
             "wavenumber_cm1": float(round(x[idx], 1)),
-            "absorbance": float(round(y_smooth[idx], 4)),
+            "absorbance": float(round(y_bc[idx], 4)),
             "fwhm": float(round(float(widths[i]) * dx, 1)),
         })
     return peaks
@@ -147,37 +163,74 @@ def _identify_functional_groups(peaks: list[dict[str, float]]) -> list[dict[str,
     matches = []
     for group in FUNCTIONAL_GROUPS:
         lo, hi = group["range"]
-        matched = [p for p in peaks if lo <= p["wavenumber_cm1"] <= hi]
+        matched = [p["wavenumber_cm1"] for p in peaks if lo <= p["wavenumber_cm1"] <= hi]
         if matched:
             matches.append({
                 "name": group["name"],
                 "note": group["note"],
                 "range_cm1": [lo, hi],
-                "matched_peaks_cm1": [p["wavenumber_cm1"] for p in matched],
+                "matched_peaks_cm1": matched,
             })
     return matches
 
 
-def parse_ftir(raw_text: str) -> dict[str, Any]:
-    # R163-worker-ftir-pe: strip vendor-specific headers before parsing
+def _flag_atmospheric(peaks: list[dict[str, float]]) -> list[dict[str, Any]]:
+    flags = []
+    for band in ATMOSPHERIC_BANDS:
+        lo, hi = band["range"]
+        matched = [p["wavenumber_cm1"] for p in peaks if lo <= p["wavenumber_cm1"] <= hi]
+        if matched:
+            flags.append({
+                "species": band["species"],
+                "note": band["note"],
+                "range_cm1": [lo, hi],
+                "matched_peaks_cm1": matched,
+            })
+    return flags
+
+
+def parse_ftir(raw_text: str, mode: str | None = None) -> dict[str, Any]:
     raw_text = _strip_pe_header(raw_text)
     raw_text = _strip_jcamp_header(raw_text)
     x, y = _parse_two_column(raw_text)
     y_mode = _detect_y_mode(y)
     y_abs = _to_absorbance(y, y_mode)
+
+    notes: list[str] = []
+    is_atr = bool(mode and mode.lower() == "atr")
+    if is_atr:
+        y_abs = _atr_correct(x, y_abs)
+        notes.append(
+            "Simple ATR correction applied (x wavenumber, penetration-depth only); "
+            "anomalous-dispersion shift not corrected (needs advanced ATR + refractive index)."
+        )
+    elif mode is None:
+        notes.append(
+            "Sampling mode unknown. If ATR, low-wavenumber bands are over-weighted "
+            "vs transmission; provide mode='atr' for correction."
+        )
+
     peaks = _detect_peaks(x, y_abs)
+    atmospheric = _flag_atmospheric(peaks)
+    if atmospheric:
+        notes.append("Possible atmospheric (CO2/H2O) bands flagged; verify against background.")
+
     return {
         "spectrum_type": "ftir",
         "peaks": peaks,
         "spectrum_curve": downsample_curve(x, y, target_points=500),  # raw values
         "quick_stats": {
-            "rowCount": int(len(x)),
+            "rowCount": len(x),
             "xRange": [float(round(x.min(), 1)), float(round(x.max(), 1))],
             "yRange": [float(round(y.min(), 4)), float(round(y.max(), 4))],
             "peakCount": len(peaks),
         },
         "y_mode": y_mode,
+        "sampling_mode": mode.lower() if mode else None,
+        "atr_corrected": is_atr,
         "functional_groups": _identify_functional_groups(peaks),
+        "atmospheric_bands": atmospheric,
+        "notes": notes,
         "x_unit": "cm-1",
         "y_unit": "%T" if y_mode == "transmittance" else "Absorbance",
     }

@@ -123,6 +123,7 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
     sample_label = metadata.get("sampleLabel") or metadata.get("sample_label")
     chemical_formula = metadata.get("chemicalFormula") or metadata.get("chemical_formula")
     anode = metadata.get("anode")  # X-ray anode: Cu/Mo/Co/Cr/Fe/Ag, default Cu
+    ftir_mode = metadata.get("samplingMode") or metadata.get("mode")  # FTIR: transmission | atr
     dsc_heating_rate = metadata.get("heatingRate") or metadata.get("heating_rate")
     dsc_sample_mass = metadata.get("sampleMass") or metadata.get("sample_mass")
     dsc_polymer = metadata.get("polymer")
@@ -190,6 +191,9 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
             raw, heating_rate_c_min=_hr, sample_mass_mg=_mass,
             polymer=dsc_polymer, y_unit=dsc_y_unit,
         )
+    elif spectrum_type == "ftir":
+        from src.parsers.ftir import parse_ftir
+        parser = lambda raw: parse_ftir(raw, mode=ftir_mode)
     else:
         parser = get_parser(spectrum_type)
 
