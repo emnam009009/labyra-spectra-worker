@@ -23,7 +23,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.parsers._utils import downsample_curve, normalize_decimal
+from src.parsers._utils import downsample_curve, normalize_decimal, strip_header
 
 logger = logging.getLogger(__name__)
 
@@ -60,14 +60,7 @@ _NUMERIC_START = re.compile(r"^\s*[+-]?(\d|\.\d)")
 
 
 def _strip_header(text: str) -> str:
-    """
-    Keep only numeric data rows. Vendor exports (ZPlot/ZView, Gamry, Autolab)
-    prepend long text headers that are not '#'-commented; a data row starts with
-    a number (optionally signed). Lines failing that test are dropped.
-    """
-    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    data = [ln for ln in lines if _NUMERIC_START.match(ln)]
-    return "\n".join(data) if data else text
+    return strip_header(text)
 
 
 def _parse_columns(
