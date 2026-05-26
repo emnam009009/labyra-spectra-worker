@@ -123,6 +123,10 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
     sample_label = metadata.get("sampleLabel") or metadata.get("sample_label")
     chemical_formula = metadata.get("chemicalFormula") or metadata.get("chemical_formula")
     anode = metadata.get("anode")  # X-ray anode: Cu/Mo/Co/Cr/Fe/Ag, default Cu
+    eis_area = metadata.get("electrodeArea") or metadata.get("area_cm2")
+    eis_n = int(metadata.get("nElectrons") or metadata.get("n_electrons") or 1)
+    eis_temp = float(metadata.get("temperatureK") or metadata.get("temperature_k") or 298.15)
+    eis_format = metadata.get("dataFormat") or metadata.get("data_format")
     ftir_mode = metadata.get("samplingMode") or metadata.get("mode")  # FTIR: transmission | atr
     dsc_heating_rate = metadata.get("heatingRate") or metadata.get("heating_rate")
     dsc_sample_mass = metadata.get("sampleMass") or metadata.get("sample_mass")
@@ -194,6 +198,13 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
     elif spectrum_type == "ftir":
         from src.parsers.ftir import parse_ftir
         parser = lambda raw: parse_ftir(raw, mode=ftir_mode)
+    elif spectrum_type == "eis":
+        from src.parsers.eis import parse_eis
+        _area = float(eis_area) if eis_area else None
+        parser = lambda raw: parse_eis(
+            raw, area_cm2=_area, n_electrons=eis_n,
+            temperature_k=eis_temp, data_format=eis_format,
+        )
     else:
         parser = get_parser(spectrum_type)
 

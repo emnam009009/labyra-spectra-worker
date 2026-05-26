@@ -30,6 +30,7 @@ dependencies = [
     # Scientific
     "numpy>=2.0.0",
     "scipy>=1.14.0",
+    "impedance>=1.7.0",
     "pandas>=2.2.0",
 
     # Spectrum parsers (phase-3b will use XRD subset)

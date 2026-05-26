@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from src.parsers.dsc import parse_dsc
+from src.parsers.eis import parse_eis
 from src.parsers.ftir import parse_ftir
 from src.parsers.ocp import parse_ocp
 from src.parsers.raman import parse_raman
@@ -22,6 +23,7 @@ PARSERS: dict[str, Callable[[str], dict[str, Any]]] = {
     "tga": parse_tga,
     "dsc": parse_dsc,
     "ocp": parse_ocp,
+    "eis": parse_eis,
 }
 
 
