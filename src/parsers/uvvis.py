@@ -12,14 +12,12 @@ Pick best R^2 across all 4. Tauc plot exposes data for any chosen transition.
 from __future__ import annotations
 
 import logging
-from io import StringIO
 from typing import Any
 
 import numpy as np
-import pandas as pd
 from scipy.signal import find_peaks, savgol_filter
 
-from src.parsers._utils import downsample_curve, normalize_decimal
+from src.parsers._utils import downsample_curve, load_xy
 
 logger = logging.getLogger(__name__)
 
@@ -33,22 +31,11 @@ TRANSITIONS: list[tuple[str, float, str]] = [
 
 
 def _parse_two_column(text: str) -> tuple[np.ndarray, np.ndarray]:
-    text = normalize_decimal(text)  # B4: EU decimal comma -> dot (no-op for US/dot)
-    for sep in [",", ";", r"\s+", "\t"]:
-        try:
-            df = pd.read_csv(
-                StringIO(text), sep=sep, header=None, comment="#",
-                engine="python", skip_blank_lines=True,
-            )
-            df = df.apply(pd.to_numeric, errors="coerce").dropna()
-            if df.shape[1] >= 2 and len(df) > 10:
-                x = df.iloc[:, 0].to_numpy(dtype=float)
-                y = df.iloc[:, 1].to_numpy(dtype=float)
-                if 100 < x.min() < 1100 and x.max() < 2000:
-                    return x, y
-        except Exception:  # noqa: BLE001
-            continue
-    raise ValueError("Could not parse two-column UV-Vis data")
+    return load_xy(
+        text,
+        validate=lambda x, y: 100 < x.min() < 1100 and x.max() < 2000,
+        min_rows=10,
+    )
 
 
 def _tauc_bandgap_for_transition(
@@ -180,7 +167,7 @@ def parse_uvvis(raw_text: str) -> dict[str, Any]:
         "tauc_curve": _tauc_curve(energy_ev, y, best_n),
         "all_transition_fits": _all_transition_summary(energy_ev, y),
         "quick_stats": {
-            "rowCount": int(len(x)),
+            "rowCount": len(x),
             "xRange": [float(round(x.min(), 1)), float(round(x.max(), 1))],
             "yRange": [float(round(y.min(), 4)), float(round(y.max(), 4))],
             "peakCount": len(peaks),

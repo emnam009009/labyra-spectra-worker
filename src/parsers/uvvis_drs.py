@@ -35,7 +35,7 @@ def _parse_two_column(text: str) -> tuple[np.ndarray, np.ndarray]:
                 y = df.iloc[:, 1].to_numpy(dtype=float)
                 if 100 < x.min() < 1100 and x.max() < 2000:
                     return x, y
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
     raise ValueError("Could not parse two-column UV-Vis DRS data")
 
@@ -181,7 +181,7 @@ def parse_uvvis_drs(raw_text: str) -> dict[str, Any]:
         "tauc_curve": _tauc_curve_drs(energy_ev, F_R, best_n),
         "all_transition_fits": _all_transition_summary_drs(energy_ev, F_R),
         "quick_stats": {
-            "rowCount": int(len(x)),
+            "rowCount": len(x),
             "xRange": [float(round(x.min(), 1)), float(round(x.max(), 1))],
             "yRange": [float(round(R.min(), 4)), float(round(R.max(), 4))],
             "peakCount": 0,

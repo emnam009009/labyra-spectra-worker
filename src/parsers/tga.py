@@ -11,35 +11,22 @@ Scientific methods: docs/scientific-methods/tga-analysis.md
 from __future__ import annotations
 
 import logging
-from io import StringIO
 from typing import Any
 
 import numpy as np
-import pandas as pd
 from scipy.signal import find_peaks, savgol_filter
 
-from src.parsers._utils import downsample_curve, normalize_decimal
+from src.parsers._utils import downsample_curve, load_xy
 
 logger = logging.getLogger(__name__)
 
 
 def _parse_two_column(text: str) -> tuple[np.ndarray, np.ndarray]:
-    text = normalize_decimal(text)  # EU decimal comma -> dot
-    for sep in [",", ";", r"\s+", "\t"]:
-        try:
-            df = pd.read_csv(
-                StringIO(text), sep=sep, header=None, comment="#",
-                engine="python", skip_blank_lines=True,
-            )
-            df = df.apply(pd.to_numeric, errors="coerce").dropna()
-            if df.shape[1] >= 2 and len(df) > 20:
-                x = df.iloc[:, 0].to_numpy(dtype=float)
-                y = df.iloc[:, 1].to_numpy(dtype=float)
-                if 20 < x.min() < 1500 and x.max() < 1500:
-                    return x, y
-        except Exception:
-            continue
-    raise ValueError("Could not parse two-column TGA data")
+    return load_xy(
+        text,
+        validate=lambda x, y: 20 < x.min() < 1500 and x.max() < 1500,
+        min_rows=20,
+    )
 
 
 def _detect_temp_unit(x: np.ndarray) -> str:

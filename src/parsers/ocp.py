@@ -34,7 +34,7 @@ def _parse_two_column(text: str) -> tuple[np.ndarray, np.ndarray]:
                 # Time >= 0, potential typically -3 to +3 V
                 if x.min() >= 0 and abs(y.min()) < 10 and abs(y.max()) < 10:
                     return x, y
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
     raise ValueError("Could not parse two-column OCP data")
 
@@ -84,7 +84,7 @@ def parse_ocp(raw_text: str) -> dict[str, Any]:
         "spectrum_curve": downsample_curve(t, v, target_points=500),
         "equilibrium": eq,
         "quick_stats": {
-            "rowCount": int(len(t)),
+            "rowCount": len(t),
             "xRange": [float(round(t.min(), 2)), float(round(t.max(), 2))],
             "yRange": [float(round(v.min(), 4)), float(round(v.max(), 4))],
             "peakCount": 0,

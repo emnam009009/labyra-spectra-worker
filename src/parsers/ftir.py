@@ -11,14 +11,12 @@ Scientific methods: docs/scientific-methods/ftir-analysis.md
 from __future__ import annotations
 
 import logging
-from io import StringIO
 from typing import Any
 
 import numpy as np
-import pandas as pd
 from scipy.signal import find_peaks, savgol_filter
 
-from src.parsers._utils import downsample_curve, normalize_decimal
+from src.parsers._utils import downsample_curve, load_xy
 
 logger = logging.getLogger(__name__)
 
@@ -62,22 +60,11 @@ def _strip_jcamp_header(text: str) -> str:
 
 
 def _parse_two_column(text: str) -> tuple[np.ndarray, np.ndarray]:
-    text = normalize_decimal(text)  # EU decimal comma -> dot
-    for sep in [",", ";", r"\s+", "\t"]:
-        try:
-            df = pd.read_csv(
-                StringIO(text), sep=sep, header=None, comment="#",
-                engine="python", skip_blank_lines=True,
-            )
-            df = df.apply(pd.to_numeric, errors="coerce").dropna()
-            if df.shape[1] >= 2 and len(df) > 10:
-                x = df.iloc[:, 0].to_numpy(dtype=float)
-                y = df.iloc[:, 1].to_numpy(dtype=float)
-                if 300 < x.min() < 5000 and x.max() < 5000:
-                    return x, y
-        except Exception:
-            continue
-    raise ValueError("Could not parse two-column FTIR data")
+    return load_xy(
+        text,
+        validate=lambda x, y: 300 < x.min() < 5000 and x.max() < 5000,
+        min_rows=10,
+    )
 
 
 def _detect_y_mode(y: np.ndarray) -> str:

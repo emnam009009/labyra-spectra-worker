@@ -4,16 +4,14 @@ from __future__ import annotations
 
 import logging
 import math
-from io import StringIO
 from typing import Any
 
 import numpy as np
-import pandas as pd
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks, savgol_filter
 
-from src.parsers._tabular import parse_csv_two_column, parse_xlsx_two_column
-from src.parsers._utils import downsample_curve, normalize_decimal
+from src.parsers._tabular import parse_xlsx_two_column
+from src.parsers._utils import downsample_curve, load_xy
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +90,7 @@ def _fit_peak_profile(
         r_squared = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
         result["r_squared"] = max(0.0, r_squared)
         return result
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
 
 
@@ -143,24 +141,11 @@ def resolve_wavelength(anode):
 
 
 def _parse_two_column(text: str) -> tuple[np.ndarray, np.ndarray]:
-    text = normalize_decimal(text)  # B4: EU decimal comma -> dot (no-op for US/dot)
-    for sep in [",", ";", r"\s+", "\t"]:
-        try:
-            df = pd.read_csv(
-                StringIO(text), sep=sep, header=None, comment="#",
-                engine="python", skip_blank_lines=True,
-            )
-            df = df.apply(pd.to_numeric, errors="coerce").dropna()
-            if df.shape[1] >= 2 and len(df) > 10:
-                x = df.iloc[:, 0].to_numpy(dtype=float)
-                y = df.iloc[:, 1].to_numpy(dtype=float)
-                # B3: accept grazing-incidence/GISAXS (low-angle) + high-angle-only
-                # scans. Only reject clearly-out-of-range or non-monotone data.
-                if 0.1 < x.min() and x.max() <= 180 and x.max() > x.min():
-                    return x, y
-        except Exception:  # noqa: BLE001
-            continue
-    raise ValueError("Could not parse two-column XRD data")
+    return load_xy(
+        text,
+        validate=lambda x, y: x.min() > 0.1 and x.max() <= 180 and x.max() > x.min(),
+        min_rows=10,
+    )
 
 
 def _detect_peaks(
@@ -291,7 +276,7 @@ def _quality_metrics(x: np.ndarray, y: np.ndarray, peaks: list[dict]) -> dict:
     metrics = {
         "scan_range_2theta": [float(round(x[0], 3)), float(round(x[-1], 3))],
         "step_size_deg": float(round((x[-1] - x[0]) / (len(x) - 1), 4)) if len(x) > 1 else 0,
-        "data_points": int(len(x)),
+        "data_points": len(x),
         "n_peaks_detected": len(peaks),
     }
     if peaks:
@@ -464,7 +449,7 @@ def _build_xrd_result(
         "peaks": peaks,
         "spectrum_curve": downsample_curve(x, y, target_points=500),
         "quick_stats": {
-            "rowCount": int(len(x)),
+            "rowCount": len(x),
             "xRange": [float(round(x.min(), 2)), float(round(x.max(), 2))],
             "yRange": [float(round(y.min(), 1)), float(round(y.max(), 1))],
             "peakCount": len(peaks),
