@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import logging
-from io import StringIO
 from typing import Any
 
 import numpy as np
-import pandas as pd
 from scipy.signal import savgol_filter
 
-from src.parsers._utils import downsample_curve
+from src.parsers._utils import downsample_curve, load_xy
 
 logger = logging.getLogger(__name__)
 
@@ -23,21 +21,11 @@ TRANSITIONS: list[tuple[str, float, str]] = [
 
 
 def _parse_two_column(text: str) -> tuple[np.ndarray, np.ndarray]:
-    for sep in [",", r"\s+", "\t"]:
-        try:
-            df = pd.read_csv(
-                StringIO(text), sep=sep, header=None, comment="#",
-                engine="python", skip_blank_lines=True,
-            )
-            df = df.apply(pd.to_numeric, errors="coerce").dropna()
-            if df.shape[1] >= 2 and len(df) > 10:
-                x = df.iloc[:, 0].to_numpy(dtype=float)
-                y = df.iloc[:, 1].to_numpy(dtype=float)
-                if 100 < x.min() < 1100 and x.max() < 2000:
-                    return x, y
-        except Exception:
-            continue
-    raise ValueError("Could not parse two-column UV-Vis DRS data")
+    return load_xy(
+        text,
+        validate=lambda x, y: 100 < x.min() < 1100 and x.max() < 2000,
+        min_rows=10,
+    )
 
 
 def _detect_reflectance_mode(y: np.ndarray) -> str:

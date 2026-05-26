@@ -9,34 +9,21 @@ Input: 2-col (time_s, potential_V_vs_ref)
 from __future__ import annotations
 
 import logging
-from io import StringIO
 from typing import Any
 
 import numpy as np
-import pandas as pd
 
-from src.parsers._utils import downsample_curve
+from src.parsers._utils import downsample_curve, load_xy
 
 logger = logging.getLogger(__name__)
 
 
 def _parse_two_column(text: str) -> tuple[np.ndarray, np.ndarray]:
-    for sep in [",", r"\s+", "\t"]:
-        try:
-            df = pd.read_csv(
-                StringIO(text), sep=sep, header=None, comment="#",
-                engine="python", skip_blank_lines=True,
-            )
-            df = df.apply(pd.to_numeric, errors="coerce").dropna()
-            if df.shape[1] >= 2 and len(df) > 10:
-                x = df.iloc[:, 0].to_numpy(dtype=float)
-                y = df.iloc[:, 1].to_numpy(dtype=float)
-                # Time >= 0, potential typically -3 to +3 V
-                if x.min() >= 0 and abs(y.min()) < 10 and abs(y.max()) < 10:
-                    return x, y
-        except Exception:
-            continue
-    raise ValueError("Could not parse two-column OCP data")
+    return load_xy(
+        text,
+        validate=lambda x, y: x.min() >= 0 and abs(y.min()) < 10 and abs(y.max()) < 10,
+        min_rows=10,
+    )
 
 
 def _equilibrium_analysis(t: np.ndarray, v: np.ndarray) -> dict[str, float]:

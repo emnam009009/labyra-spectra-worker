@@ -15,13 +15,11 @@ Scientific methods: docs/scientific-methods/lsv-analysis.md
 from __future__ import annotations
 
 import logging
-from io import StringIO
 from typing import Any
 
 import numpy as np
-import pandas as pd
 
-from src.parsers._utils import downsample_curve, normalize_decimal
+from src.parsers._utils import downsample_curve, load_xy
 
 logger = logging.getLogger(__name__)
 
@@ -48,23 +46,11 @@ ONSET_J = 1.0                  # mA/cm2 — onset definition
 
 
 def _parse_two_column(text: str) -> tuple[np.ndarray, np.ndarray]:
-    text = normalize_decimal(text)
-    for sep in [",", ";", r"\s+", "\t"]:
-        try:
-            df = pd.read_csv(
-                StringIO(text), sep=sep, header=None, comment="#",
-                engine="python", skip_blank_lines=True,
-            )
-            df = df.apply(pd.to_numeric, errors="coerce").dropna()
-            if df.shape[1] >= 2 and len(df) > 10:
-                e = df.iloc[:, 0].to_numpy(dtype=float)
-                i = df.iloc[:, 1].to_numpy(dtype=float)
-                # potential typically -2..+2 V; current any scale
-                if abs(e).max() < 10:
-                    return e, i
-        except Exception:
-            continue
-    raise ValueError("Could not parse two-column LSV data (potential, current)")
+    return load_xy(
+        text,
+        validate=lambda e, i: abs(e).max() < 10,
+        min_rows=10,
+    )
 
 
 def _to_rhe(

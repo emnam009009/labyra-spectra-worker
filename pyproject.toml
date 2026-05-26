@@ -67,10 +67,11 @@ ignore = ["E501"]  # line length handled by formatter
 # Greek letters (α β γ θ λ ν) and other domain symbols are intentional in
 # scientific strings/comments; RUF001/002/003 are false positives there.
 [tool.ruff.lint.per-file-ignores]
-"src/parsers/*.py" = ["RUF001", "RUF002", "RUF003"]
+"src/parsers/*.py" = ["RUF001", "RUF002", "RUF003", "N803", "N806", "RUF059", "SIM108"]
 "src/deviation/*.py" = ["RUF001", "RUF002", "RUF003"]
 "src/citation/*.py" = ["RUF001", "RUF002", "RUF003"]
 "src/materials/*.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/*.py" = ["RUF059"]
 
 [tool.mypy]
 python_version = "3.12"

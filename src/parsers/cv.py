@@ -18,14 +18,12 @@ Scientific methods: docs/scientific-methods/cv-analysis.md
 from __future__ import annotations
 
 import logging
-from io import StringIO
 from typing import Any
 
 import numpy as np
-import pandas as pd
 from scipy.signal import find_peaks
 
-from src.parsers._utils import downsample_curve, normalize_decimal
+from src.parsers._utils import downsample_curve, load_xy
 
 logger = logging.getLogger(__name__)
 
@@ -33,22 +31,11 @@ NERNST_DEP_MV = 59.0  # 59/n mV ideal peak separation at 25 C
 
 
 def _parse_two_column(text: str) -> tuple[np.ndarray, np.ndarray]:
-    text = normalize_decimal(text)
-    for sep in [",", ";", r"\s+", "\t"]:
-        try:
-            df = pd.read_csv(
-                StringIO(text), sep=sep, header=None, comment="#",
-                engine="python", skip_blank_lines=True,
-            )
-            df = df.apply(pd.to_numeric, errors="coerce").dropna()
-            if df.shape[1] >= 2 and len(df) > 20:
-                e = df.iloc[:, 0].to_numpy(dtype=float)
-                i = df.iloc[:, 1].to_numpy(dtype=float)
-                if abs(e).max() < 10:
-                    return e, i
-        except Exception:
-            continue
-    raise ValueError("Could not parse two-column CV data (potential, current)")
+    return load_xy(
+        text,
+        validate=lambda e, i: abs(e).max() < 10,
+        min_rows=20,
+    )
 
 
 def _split_sweeps(e: np.ndarray, i: np.ndarray) -> tuple[
@@ -65,19 +52,34 @@ def _split_sweeps(e: np.ndarray, i: np.ndarray) -> tuple[
 def _peak_in_branch(
     e: np.ndarray, i: np.ndarray, anodic: bool
 ) -> tuple[float, float] | None:
-    """Dominant peak in a branch. Anodic = max +current; cathodic = max -current."""
+    """
+    Dominant redox peak in a branch (anodic = +current peak, cathodic = -current
+    peak), selected by PROMINENCE rather than raw |current|: a real redox peak
+    rises above the local baseline, whereas catalytic current (HER/OER) grows
+    monotonically toward the potential limit and would otherwise be mistaken for
+    a peak. Peaks within 5% of the potential vertices are excluded (the sweep
+    reversal / current ramp produces a large spurious prominence there). Returns
+    None if no genuine interior peak exists (no fabricated peak).
+
+    @phase R254-1 (real-data hardening, CorrWare CV.cor).
+    """
     if len(e) < 5:
         return None
     sig = i if anodic else -i
-    base = float(np.median(sig))
-    prom = (sig.max() - sig.min()) * 0.05
-    idx, _ = find_peaks(sig, prominence=max(prom, 1e-12))
-    if len(idx) == 0:
-        k = int(np.argmax(sig))
-        if sig[k] - base <= 0:
-            return None
-        return float(e[k]), float(i[k])
-    k = int(idx[np.argmax(sig[idx])])
+    span = float(sig.max() - sig.min())
+    if span <= 0:
+        return None
+    idx, props = find_peaks(sig, prominence=span * 0.05)
+    e_lo, e_hi = float(e.min()), float(e.max())
+    e_pad = (e_hi - e_lo) * 0.05
+    keep = [
+        (k, pr)
+        for k, pr in zip(idx, props["prominences"], strict=False)
+        if e_lo + e_pad < e[k] < e_hi - e_pad
+    ]
+    if not keep:
+        return None
+    k = max(keep, key=lambda kp: kp[1])[0]
     return float(e[k]), float(i[k])
 
 

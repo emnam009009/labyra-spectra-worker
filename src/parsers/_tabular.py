@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from io import BytesIO, StringIO
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from src.parsers._utils import normalize_decimal
+from src.parsers._utils import normalize_decimal, strip_header
 
 logger = logging.getLogger(__name__)
 
@@ -149,3 +150,77 @@ def parse_csv_two_column(text: str) -> tuple[np.ndarray, np.ndarray] | None:
         except Exception:
             continue
     return None
+
+
+def load_spectrum(
+    text: str,
+    *,
+    validate: Callable[[np.ndarray, np.ndarray], bool] | None = None,
+    min_rows: int = 10,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Universal 2-column loader: single entry point for every text parser.
+
+    Strategy, in order:
+      1. parse_csv_two_column — smart column detection by header name
+         (2theta/wavelength/wavenumber/shift/temperature/potential...). Best when
+         the file has descriptive column headers.
+      2. Vendor-header fallback — strip non-numeric preamble (CorrWare/ZPlot/
+         Gamry/Bio-Logic export headers that have no column names) and read the
+         first two numeric columns.
+    EU decimal commas are normalised in both paths. The per-technique
+    ``validate(x, y)`` callback enforces the physically valid range so a wrong
+    column layout is rejected rather than silently accepted.
+
+    Raises ValueError if neither path yields a valid (x, y) table.
+
+    @phase R259 (loader unification) — supersedes _utils.load_xy and the
+    per-parser _parse_two_column copies; combines header-name detection +
+    Excel support (_tabular) with vendor-header stripping + range validation.
+    """
+    # Decide path by structure. A file with a descriptive (non-numeric) header
+    # row, or with more than two columns, needs column-name detection so the
+    # right pair (e.g. 2theta+intensity, not an index/error column) is picked.
+    # A plain header-less 2-column file uses the numeric path, which keeps every
+    # data row (header-name detection would consume the first row as a header).
+    stripped = strip_header(text)
+    normalized = normalize_decimal(stripped)
+    first = next((ln for ln in normalized.splitlines() if ln.strip()), "")
+    ncols = max((len(re.split(r"[,;\t]|\s+", ln.strip()))
+                 for ln in normalized.splitlines()[:50] if ln.strip()), default=2)
+    header_is_text = bool(first) and not re.match(r"^\s*[+-]?(\d|\.\d)", first)
+    prefer_named = header_is_text or ncols > 2
+
+    def _numeric_path() -> tuple[np.ndarray, np.ndarray] | None:
+        cleaned = normalized
+        for sep in [",", ";", r"\s+", "\t"]:
+            try:
+                df = pd.read_csv(
+                    StringIO(cleaned), sep=sep, header=None, comment="#",
+                    engine="python", skip_blank_lines=True,
+                )
+                df = df.apply(pd.to_numeric, errors="coerce").dropna()
+                if df.shape[1] < 2 or len(df) < min_rows:
+                    continue
+                x = df.iloc[:, 0].to_numpy(dtype=float)
+                y = df.iloc[:, 1].to_numpy(dtype=float)
+                if validate is None or validate(x, y):
+                    return x, y
+            except Exception:
+                continue
+        return None
+
+    def _named_path() -> tuple[np.ndarray, np.ndarray] | None:
+        res = parse_csv_two_column(text)
+        if res is not None:
+            x, y = res
+            if len(x) >= min_rows and (validate is None or validate(x, y)):
+                return x, y
+        return None
+
+    order = (_named_path, _numeric_path) if prefer_named else (_numeric_path, _named_path)
+    for path in order:
+        out = path()
+        if out is not None:
+            return out
+
+    raise ValueError("Could not parse two-column data (need numeric x, y columns)")

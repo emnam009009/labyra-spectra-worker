@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from io import StringIO
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -98,35 +97,15 @@ def load_xy(
     min_rows: int = 10,
     min_cols: int = 2,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Universal two-column loader for spectra/voltammetry text exports.
+    """Backwards-compatible alias for the unified loader.
 
-    Strips vendor headers, normalises EU decimals, then tries common delimiters
-    (comma, semicolon, whitespace, tab). Returns the first two numeric columns
-    (x, y) that pass the per-technique ``validate(x, y)`` callback. The callback
-    encodes the physically valid range (e.g. XRD 0.1-180 deg, FTIR 300-5000
-    cm-1) so a wrong column layout is rejected rather than silently accepted.
+    Delegates to _tabular.load_spectrum (header-name detection + Excel +
+    vendor-header strip + range validation). Kept so existing call sites
+    (xrd/raman/ftir/tga/dsc/uvvis) need no change. ``min_cols`` is accepted
+    for signature compatibility but load_spectrum always needs >=2 columns.
 
-    Raises ValueError if no delimiter yields a valid table.
-
-    @phase R256 (universal loader) — single source of truth replacing the
-    per-parser _parse_two_column copies.
+    @phase R259 — see src.parsers._tabular.load_spectrum (single source).
     """
-    import pandas as pd  # local import keeps _utils light for edge runtime
+    from src.parsers._tabular import load_spectrum  # lazy: avoid import cycle
 
-    cleaned = normalize_decimal(strip_header(text))
-    for sep in [",", ";", r"\s+", "\t"]:
-        try:
-            df = pd.read_csv(
-                StringIO(cleaned), sep=sep, header=None, comment="#",
-                engine="python", skip_blank_lines=True,
-            )
-            df = df.apply(pd.to_numeric, errors="coerce").dropna()
-            if df.shape[1] < min_cols or len(df) < min_rows:
-                continue
-            x = df.iloc[:, 0].to_numpy(dtype=float)
-            y = df.iloc[:, 1].to_numpy(dtype=float)
-            if validate is None or validate(x, y):
-                return x, y
-        except Exception:
-            continue
-    raise ValueError("Could not parse two-column data (need numeric x, y columns)")
+    return load_spectrum(text, validate=validate, min_rows=min_rows)
