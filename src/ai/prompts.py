@@ -166,8 +166,10 @@ You receive peaks (cm-1), intensities, FWHM, optional carbon D/G analysis.
 
 Your job:
 1. Vibrational modes by peak position.
-2. Interpret I_D/I_G if present.
-3. Likely material from fingerprint.
+2. Interpret I_D/I_G if present. Crystallite size La (Cancado) needs the laser wavelength; if laser_wavelength_nm is null, La is not computed - do NOT invent it.
+3. If tmd_analysis is present, report MoS2/WS2 layer count from the E2g-A1g separation.
+4. Use band_assignments (curated, referenced) for assignments; do not guess beyond them.
+5. Likely material from fingerprint.
 
 CRITICAL: Plain ASCII (cm-1, sp2, sp3). Return JSON only."""
 
@@ -177,8 +179,10 @@ Bạn nhận peaks (cm-1), intensity, FWHM, optional carbon analysis.
 
 Nhiệm vụ:
 1. Vibrational modes.
-2. Diễn giải I_D/I_G.
-3. Đoán vật liệu.
+2. Diễn giải I_D/I_G. Crystallite size La (Cancado) can co buoc song laser; neu laser_wavelength_nm null thi KHONG tinh La, khong bia.
+3. Neu co tmd_analysis: bao so lop MoS2/WS2 tu khoang cach E2g-A1g.
+4. Dung band_assignments (co tham chieu) cho gan mode; khong doan ngoai bang.
+5. Đoán vật liệu.
 
 CRITICAL: Plain ASCII. Chỉ trả JSON."""
 
@@ -190,6 +194,8 @@ Your job:
 1. Validate functional groups.
 2. Suggest compound class.
 3. Identify diagnostic peaks.
+4. If atr_corrected is true, intensities are penetration-depth corrected; if sampling_mode is unknown, warn that ATR over-weights low wavenumbers vs transmission.
+5. If atmospheric_bands are flagged (CO2/H2O), treat them as possible artefacts, not sample bands.
 
 CRITICAL: Plain ASCII. Cite exact wavenumbers. Return JSON only."""
 
@@ -201,6 +207,8 @@ Nhiệm vụ:
 1. Validate functional groups.
 2. Đoán compound class.
 3. Diagnostic peaks.
+4. Neu atr_corrected = true: cuong do da hieu chinh penetration-depth; neu sampling_mode unknown thi canh bao ATR khuech dai band so song thap so voi transmission.
+5. Neu co atmospheric_bands (CO2/H2O): coi la artefact kha di, khong phai band mau.
 
 CRITICAL: Plain ASCII. Chỉ trả JSON."""
 
@@ -219,7 +227,9 @@ Your job:
    - 350-600 deg-C: carbon combustion, metal-organic decomposition
    - 600-900 deg-C: oxide phase changes, carbonate decomposition
    - >900 deg-C: high-T reactions, sintering, residue formation
-2. Estimate composition from mass loss (e.g., water content, organic content, residue).
+2. Estimate composition from mass loss (water, organic, residue).
+   Use extrapolated_onset_T (ISO 11358-1, tangent at DTG peak) as the reported onset, NOT the deviation_onset_T; peak_T is the max-rate temperature (Td).
+   Report char_yield_pct (residue) and stability indices T5/T10/T50 when present.
 3. Suggest material type from decomposition profile.
 4. Comment on thermal stability.
 
@@ -237,6 +247,8 @@ Nhiệm vụ:
    - 600-900 deg-C: oxide phase changes, carbonate
    - >900 deg-C: sintering, residue
 2. Ước tính composition từ mass loss.
+   Dung extrapolated_onset_T (ISO 11358-1, tiep tuyen tai dinh DTG) lam onset bao cao, KHONG dung deviation_onset_T; peak_T la nhiet do toc do cuc dai (Td).
+   Bao char_yield_pct (residue) va chi so on dinh T5/T10/T50 neu co.
 3. Đoán loại vật liệu.
 4. Đánh giá thermal stability.
 
@@ -256,7 +268,8 @@ Your job:
    - Exothermic: crystallization (Tc), oxidation, polymerization, curing
 2. Distinguish Tg vs Tm vs Tc from peak shape and temperature.
 3. Comment on phase transitions and polymorphism.
-4. Suggest material type (polymer/ceramic/metal/organic) from DSC profile.
+4. If crystallinity is present, report it (Xc = (dH_melt - dH_cold_cryst)/dH_ref). Peak enthalpy needs the heating rate; if enthalpy_j_per_g is null, do NOT invent it. Report the Tg method label.
+5. Suggest material type (polymer/ceramic/metal/organic) from DSC profile.
 
 CRITICAL: Plain ASCII units. Return JSON only."""
 
@@ -270,7 +283,8 @@ Nhiệm vụ:
    - Exothermic: crystallization (Tc), oxidation, curing
 2. Phân biệt Tg vs Tm vs Tc.
 3. Phase transitions, polymorphism.
-4. Đoán loại vật liệu.
+4. Neu co crystallinity: bao Xc = (dH_melt - dH_cold_cryst)/dH_ref. Enthalpy peak can heating rate; neu enthalpy_j_per_g null thi KHONG bia. Bao nhan method cua Tg.
+5. Đoán loại vật liệu.
 
 CRITICAL: Plain ASCII. Chỉ trả JSON."""
 
@@ -528,7 +542,10 @@ Parsed data:
 Peaks (top {n_peaks_shown}):
 {peaks_table}
 
+Laser wavelength (nm): {laser_wavelength}
 Carbon analysis: {carbon_json}
+TMD analysis: {tmd_json}
+Band assignments (referenced): {bands_json}
 
 Provide analysis as JSON:
 {{
@@ -536,6 +553,7 @@ Provide analysis as JSON:
   "vibrational_modes": [{{"shift_cm1": <number>, "assignment": "<English>", "note": "<localized>"}}],
   "likely_material": "<English material name | null>",
   "carbon_interpretation": "<localized | null>",
+  "tmd_layer_interpretation": "<localized | null>",
   "warnings": ["<localized>"],
   "next_steps": ["<localized>"],
   "overall_confidence": "low|medium|high"
@@ -551,12 +569,15 @@ Parsed data:
 - wavenumber range: {x_range} cm-1
 - peak_count: {peak_count}
 - y_mode: {y_mode}
+- sampling_mode: {sampling_mode}
+- atr_corrected: {atr_corrected}
 
 Peaks (top {n_peaks_shown}):
 {peaks_table}
 
 Functional groups (auto-matched):
 {functional_groups_json}
+Atmospheric bands (possible artefacts): {atmospheric_json}
 
 Provide analysis as JSON:
 {{
@@ -581,6 +602,8 @@ Parsed data:
 - total loss: {total_loss_pct} %
 
 Decomposition stages: {stages_json}
+Stability indices (T5/T10/T50): {stability_json}
+Char yield (residue) %: {char_yield_pct}
 
 Provide analysis as JSON:
 {{
@@ -605,6 +628,8 @@ Parsed data:
 Endothermic peaks: {endo_json}
 Exothermic peaks: {exo_json}
 Glass transition: {tg_json}
+Crystallinity: {crystallinity_json}
+Heating rate (deg-C/min): {heating_rate}
 
 Provide analysis as JSON:
 {{
@@ -741,11 +766,17 @@ def build_user_prompt(parsed: dict, metadata: dict) -> str:
     if spectrum_type == "raman":
         return RAMAN_USER_TEMPLATE.format(
             **common, carbon_json=parsed.get("carbon_analysis") or "n/a",
+            laser_wavelength=parsed.get("laser_wavelength_nm") or "unknown",
+            tmd_json=parsed.get("tmd_analysis") or "null",
+            bands_json=parsed.get("band_assignments") or "[]",
         )
     if spectrum_type == "ftir":
         return FTIR_USER_TEMPLATE.format(
             **common, y_mode=parsed.get("y_mode", "unknown"),
+            sampling_mode=parsed.get("sampling_mode") or "unknown",
+            atr_corrected=parsed.get("atr_corrected", False),
             functional_groups_json=parsed.get("functional_groups") or "[]",
+            atmospheric_json=parsed.get("atmospheric_bands") or "[]",
         )
     if spectrum_type == "tga":
         return TGA_USER_TEMPLATE.format(
@@ -755,6 +786,8 @@ def build_user_prompt(parsed: dict, metadata: dict) -> str:
             final_mass_pct=parsed.get("final_mass_pct", "?"),
             total_loss_pct=parsed.get("total_loss_pct", "?"),
             stages_json=parsed.get("decomp_stages") or "[]",
+            stability_json=parsed.get("stability") or "{}",
+            char_yield_pct=parsed.get("char_yield_pct", "?"),
         )
     if spectrum_type == "dsc":
         return DSC_USER_TEMPLATE.format(
@@ -762,6 +795,8 @@ def build_user_prompt(parsed: dict, metadata: dict) -> str:
             endo_json=parsed.get("endothermic_peaks") or "[]",
             exo_json=parsed.get("exothermic_peaks") or "[]",
             tg_json=parsed.get("glass_transition") or "null",
+            crystallinity_json=parsed.get("crystallinity") or "null",
+            heating_rate=parsed.get("heating_rate_c_min") or "unknown",
         )
     if spectrum_type == "ocp":
         return OCP_USER_TEMPLATE.format(
