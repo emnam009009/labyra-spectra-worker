@@ -123,6 +123,11 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
     sample_label = metadata.get("sampleLabel") or metadata.get("sample_label")
     chemical_formula = metadata.get("chemicalFormula") or metadata.get("chemical_formula")
     anode = metadata.get("anode")  # X-ray anode: Cu/Mo/Co/Cr/Fe/Ag, default Cu
+    dsc_heating_rate = metadata.get("heatingRate") or metadata.get("heating_rate")
+    dsc_sample_mass = metadata.get("sampleMass") or metadata.get("sample_mass")
+    dsc_polymer = metadata.get("polymer")
+    dsc_y_unit = metadata.get("yUnit") or metadata.get("heatFlowUnit")
+    laser_wl_meta = metadata.get("laserWavelength") or metadata.get("laser_wavelength")  # Raman excitation (nm)
     monochromator = metadata.get("monochromator")  # none/ni_filter/graphite/ge111/johansson/si220
     profile_function = metadata.get("profileFunction") or "pseudo_voigt"  # R161-phase-E
     zero_shift = float(metadata.get("zeroShift") or 0.0)  # 2θ correction in degrees
@@ -173,6 +178,18 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
                 profile=profile_function,
                 zero_shift=zero_shift,
             )
+    elif spectrum_type == "raman":
+        from src.parsers.raman import parse_raman
+        _laser = float(laser_wl_meta) if laser_wl_meta else None
+        parser = lambda raw: parse_raman(raw, laser_wavelength=_laser)
+    elif spectrum_type == "dsc":
+        from src.parsers.dsc import parse_dsc
+        _hr = float(dsc_heating_rate) if dsc_heating_rate else None
+        _mass = float(dsc_sample_mass) if dsc_sample_mass else None
+        parser = lambda raw: parse_dsc(
+            raw, heating_rate_c_min=_hr, sample_mass_mg=_mass,
+            polymer=dsc_polymer, y_unit=dsc_y_unit,
+        )
     else:
         parser = get_parser(spectrum_type)
 
@@ -208,7 +225,7 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
     composition = metadata.get("composition")  # list of {formula, role, nominalFraction}
     if chemical_formula or composition:
         try:
-            laser_wl = metadata.get("laserWavelength") or metadata.get("laser_wavelength")
+            laser_wl = laser_wl_meta
             material_profile = get_material_profile(chemical_formula) if chemical_formula else None
 
             deviation_result = run_deviation_analysis(
