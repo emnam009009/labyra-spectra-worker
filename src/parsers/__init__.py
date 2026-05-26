@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from src.parsers.cv import parse_cv
 from src.parsers.dsc import parse_dsc

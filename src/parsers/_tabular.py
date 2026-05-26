@@ -12,9 +12,9 @@ from io import BytesIO, StringIO
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from src.parsers._utils import normalize_decimal
-import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ def parse_xlsx_two_column(raw_bytes: bytes) -> tuple[np.ndarray, np.ndarray] | N
     """Parse .xlsx → (x, y) arrays. Returns None on failure."""
     try:
         df = pd.read_excel(BytesIO(raw_bytes), sheet_name=0, engine="openpyxl")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("Excel parse failed: %s", exc)
         return None
 
@@ -146,6 +146,6 @@ def parse_csv_two_column(text: str) -> tuple[np.ndarray, np.ndarray] | None:
                     mask = x.notna() & y.notna()
                     if mask.sum() >= 10:
                         return (x[mask].to_numpy(dtype=float), y[mask].to_numpy(dtype=float))
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
     return None
