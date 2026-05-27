@@ -41,6 +41,11 @@ class JournalResolveResult(BaseModel):
     journal: str = ""
     """Journal name (Crossref container-title)."""
 
+    title: str = ""
+    """R228: canonical article title from the publisher (Crossref/OpenAlex).
+    Authoritative — preferred over the OCR/Gemini-extracted title, which can
+    misread words (e.g. 'Phage' → 'Please'). Empty if lookup had no title."""
+
     journal_short: str = ""
     """Short journal name (Crossref short-container-title)."""
 
@@ -80,6 +85,7 @@ def resolve_journal_from_doi(doi: str) -> JournalResolveResult:
         issn = _extract_issn(cr_data)
         if journal:
             result.journal = journal
+            result.title = _extract_title(cr_data)
             result.journal_short = journal_short
             result.journal_issn = issn
             result.source_id = "crossref"
@@ -91,6 +97,9 @@ def resolve_journal_from_doi(doi: str) -> JournalResolveResult:
         journal, journal_short, issn = _parse_openalex(oa_data)
         if journal:
             result.journal = journal
+            oa_title = oa_data.get("title") or oa_data.get("display_name")
+            if isinstance(oa_title, str):
+                result.title = oa_title.strip()
             result.journal_short = journal_short
             result.journal_issn = issn
             result.source_id = "openalex"
@@ -126,6 +135,18 @@ def _extract_journal(msg: dict) -> str:
     cont = msg.get("container-title")
     if isinstance(cont, list) and cont and isinstance(cont[0], str):
         return cont[0].strip()
+    return ""
+
+
+def _extract_title(msg: dict) -> str:
+    """R228: Crossref article title (first non-empty entry)."""
+    raw = msg.get("title")
+    if isinstance(raw, list):
+        for t in raw:
+            if isinstance(t, str) and t.strip():
+                return t.strip()
+    elif isinstance(raw, str) and raw.strip():
+        return raw.strip()
     return ""
 
 

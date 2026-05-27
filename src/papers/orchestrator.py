@@ -312,13 +312,32 @@ def process_paper(
 
             if doi_value:
                 journal_result = resolve_journal_from_doi(doi_value)
-                db.document(f"tenants/{tenant_id}/papers/{paper_id}").update({
+                journal_update = {
                     "journal": journal_result.journal,
                     "journalShort": journal_result.journal_short,
                     "journalIssn": journal_result.journal_issn,
                     "journalSourceId": journal_result.source_id,
                     "journalResolvedAt": journal_result.resolved_at,
-                })
+                }
+                # R228: the publisher's title is authoritative. The OCR/Gemini
+                # title can misread words (observed: 'Phage' → 'Please'). When a
+                # canonical title comes back from Crossref/OpenAlex, overwrite the
+                # extracted one (Firestore + local paper for the index step).
+                if journal_result.title:
+                    journal_update["title"] = journal_result.title
+                    journal_update["titleSourceId"] = journal_result.source_id
+                    try:
+                        paper = paper.model_copy(update={"title": journal_result.title})
+                    except Exception:  # noqa: BLE001 — best-effort local sync
+                        pass
+                    logger.info(
+                        "step1e_title_override tenant=%s paper=%s ocr=%r -> %s=%r",
+                        tenant_id, paper_id,
+                        (meta.title if meta is not None else "")[:60],
+                        journal_result.source_id,
+                        journal_result.title[:60],
+                    )
+                db.document(f"tenants/{tenant_id}/papers/{paper_id}").update(journal_update)
                 logger.info(
                     "step1e_journal_done tenant=%s paper=%s journal=%s source=%s rejected=%s",
                     tenant_id, paper_id,

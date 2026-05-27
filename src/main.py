@@ -138,6 +138,11 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
     pec_area = metadata.get("electrodeArea") or metadata.get("area_cm2")
     pec_light_power = metadata.get("lightPower") or metadata.get("light_power_mw_cm2")
     pec_bias = metadata.get("appliedBias") or metadata.get("applied_bias_v")
+    pec_eps_r = metadata.get("dielectricConstant") or metadata.get("eps_r")
+    pec_ms_temp = float(
+        metadata.get("temperatureK") or metadata.get("temperature_k") or 298.15
+    )
+    pec_ms_freqs = metadata.get("frequenciesHz") or metadata.get("frequencies_hz")
     ftir_mode = metadata.get("samplingMode") or metadata.get("mode")  # FTIR: transmission | atr
     dsc_heating_rate = metadata.get("heatingRate") or metadata.get("heating_rate")
     dsc_sample_mass = metadata.get("sampleMass") or metadata.get("sample_mass")
@@ -245,6 +250,15 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
         _bias = float(pec_bias) if pec_bias else None
         parser = lambda raw: parse_pec_jv(
             raw, area_cm2=_a, light_power_mw_cm2=_lp, applied_bias_v=_bias,
+        )
+    elif spectrum_type == "pec_mott_schottky":
+        from src.parsers.pec_mott_schottky import parse_pec_mott_schottky
+        _a = float(pec_area) if pec_area else None
+        _eps = float(pec_eps_r) if pec_eps_r else None
+        _ph = float(lsv_ph) if lsv_ph is not None else None
+        parser = lambda raw: parse_pec_mott_schottky(
+            raw, eps_r=_eps, reference=lsv_ref, ph=_ph, area_cm2=_a,
+            temperature_k=pec_ms_temp, frequencies_hz=pec_ms_freqs,
         )
     else:
         parser = get_parser(spectrum_type)
