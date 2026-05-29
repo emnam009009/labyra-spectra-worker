@@ -217,6 +217,16 @@ class PaperDoc(BaseModel):
     journal_source_id: str = Field(default="", alias="journalSourceId")
     """'crossref' | 'openalex' | '' if both failed."""
 
+    # R237bm: self-DOI resolution (Phase 1) — @doi-resolution-v1
+    self_doi_source: str = Field(default="", alias="selfDoiSource")
+    """How the paper's OWN DOI was found: '' (none) | 'gemini' (page-1 extract)
+    | 'page-text' (labelled DOI on pages 1-3) | 'crossref-title' (Phase 2)."""
+
+    doi_title_mismatch: bool = Field(default=False, alias="doiTitleMismatch")
+    """True when a resolved-by-DOI title was WITHHELD because it didn't match the
+    OCR title/authors (guard A). The DOI is kept; the OCR title is preserved for
+    manual confirmation. Surfaces in the UI as a 'check title' hint."""
+
     journal_resolved_at: int = Field(default=0, alias="journalResolvedAt")
     """Epoch ms when Step 1e completed."""
 

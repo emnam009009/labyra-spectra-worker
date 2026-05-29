@@ -136,6 +136,22 @@ def process_paper(
                 "step1b_output tenant=%s paper=%s title=%r authors=%d year=%s doi=%r",
                 tenant_id, paper_id, meta.title, len(meta.authors), meta.year, meta.doi,
             )
+            # R237bm (gap B): if Gemini found no DOI, scan pages 1-3 for a
+            # LABELLED self-DOI before giving up. Deterministic, best-effort —
+            # the DOI is printed on the opening pages of most articles.
+            self_doi_source = "gemini" if (meta.doi or "").strip() else ""
+            if not (meta.doi or "").strip():
+                from src.papers.self_doi_resolver import extract_self_doi
+
+                pages_text = [p.text for p in ocr_result.pages[:3]]
+                recovered = extract_self_doi(pages_text)
+                if recovered.found:
+                    meta.doi = recovered.doi
+                    self_doi_source = recovered.source
+                    logger.info(
+                        "self_doi_recovered tenant=%s paper=%s doi=%r source=%s",
+                        tenant_id, paper_id, recovered.doi, recovered.source,
+                    )
             # Persist input length + output snapshot to Firestore for offline debug
             try:
                 db.document(f"tenants/{tenant_id}/papers/{paper_id}").update({
@@ -158,6 +174,7 @@ def process_paper(
                 "documentType": meta.document_type,
                 "isbn": meta.isbn,
                 "publisher": meta.publisher,
+                "selfDoiSource": self_doi_source,
                 "metadataExtractedAt": SERVER_TIMESTAMP,
             }
             db.document(f"tenants/{tenant_id}/papers/{paper_id}").update(update_payload)
@@ -319,24 +336,52 @@ def process_paper(
                     "journalSourceId": journal_result.source_id,
                     "journalResolvedAt": journal_result.resolved_at,
                 }
-                # R228: the publisher's title is authoritative. The OCR/Gemini
-                # title can misread words (observed: 'Phage' → 'Please'). When a
-                # canonical title comes back from Crossref/OpenAlex, overwrite the
-                # extracted one (Firestore + local paper for the index step).
+                # R228 + R237bm (gap A/C): the publisher's title is authoritative
+                # for OCR typos (e.g. 'Phage'→'Please'), BUT a hallucinated/wrong
+                # DOI would resolve to a DIFFERENT paper. So only override when the
+                # multi-tier guard accepts the record; otherwise keep the OCR title
+                # and flag it for manual review. When accepted, also adopt the
+                # canonical authors (gap C).
                 if journal_result.title:
-                    journal_update["title"] = journal_result.title
-                    journal_update["titleSourceId"] = journal_result.source_id
-                    try:
-                        paper = paper.model_copy(update={"title": journal_result.title})
-                    except Exception:  # noqa: BLE001 — best-effort local sync
-                        pass
-                    logger.info(
-                        "step1e_title_override tenant=%s paper=%s ocr=%r -> %s=%r",
-                        tenant_id, paper_id,
-                        (meta.title if meta is not None else "")[:60],
-                        journal_result.source_id,
-                        journal_result.title[:60],
+                    from src.papers.self_doi_resolver import should_override_title
+
+                    do_override, reason = should_override_title(
+                        meta.title if meta is not None else "",
+                        meta.authors if meta is not None else [],
+                        journal_result.title,
+                        journal_result.authors,
                     )
+                    if do_override:
+                        journal_update["title"] = journal_result.title
+                        journal_update["titleSourceId"] = journal_result.source_id
+                        journal_update["doiTitleMismatch"] = False
+                        local_update: dict = {"title": journal_result.title}
+                        if journal_result.authors:
+                            journal_update["authors"] = journal_result.authors
+                            local_update["authors"] = journal_result.authors
+                        try:
+                            paper = paper.model_copy(update=local_update)
+                        except Exception:  # noqa: BLE001 — best-effort local sync
+                            pass
+                        logger.info(
+                            "step1e_title_override tenant=%s paper=%s reason=%s ocr=%r -> %s=%r",
+                            tenant_id, paper_id, reason,
+                            (meta.title if meta is not None else "")[:60],
+                            journal_result.source_id,
+                            journal_result.title[:60],
+                        )
+                    else:
+                        # DOI resolved to a title that doesn't match — keep OCR
+                        # title, flag for manual confirmation (Trust > Coverage).
+                        journal_update["doiTitleMismatch"] = True
+                        logger.warning(
+                            "step1e_title_mismatch tenant=%s paper=%s reason=%s "
+                            "ocr=%r resolved=%s=%r (kept OCR title)",
+                            tenant_id, paper_id, reason,
+                            (meta.title if meta is not None else "")[:60],
+                            journal_result.source_id,
+                            journal_result.title[:60],
+                        )
                 db.document(f"tenants/{tenant_id}/papers/{paper_id}").update(journal_update)
                 logger.info(
                     "step1e_journal_done tenant=%s paper=%s journal=%s source=%s rejected=%s",

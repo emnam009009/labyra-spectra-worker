@@ -46,6 +46,11 @@ class JournalResolveResult(BaseModel):
     Authoritative — preferred over the OCR/Gemini-extracted title, which can
     misread words (e.g. 'Phage' → 'Please'). Empty if lookup had no title."""
 
+    authors: list[str] = Field(default_factory=list)
+    """R237bm (gap C): canonical author list from the publisher, "Family, Given"
+    (Crossref) / display name (OpenAlex). Used to overwrite misread OCR authors
+    once the DOI→title override guard has accepted the record. Empty if none."""
+
     journal_short: str = ""
     """Short journal name (Crossref short-container-title)."""
 
@@ -86,6 +91,7 @@ def resolve_journal_from_doi(doi: str) -> JournalResolveResult:
         if journal:
             result.journal = journal
             result.title = _extract_title(cr_data)
+            result.authors = _extract_authors(cr_data)
             result.journal_short = journal_short
             result.journal_issn = issn
             result.source_id = "crossref"
@@ -100,6 +106,7 @@ def resolve_journal_from_doi(doi: str) -> JournalResolveResult:
             oa_title = oa_data.get("title") or oa_data.get("display_name")
             if isinstance(oa_title, str):
                 result.title = oa_title.strip()
+            result.authors = _extract_authors_openalex(oa_data)
             result.journal_short = journal_short
             result.journal_issn = issn
             result.source_id = "openalex"
@@ -148,6 +155,42 @@ def _extract_title(msg: dict) -> str:
     elif isinstance(raw, str) and raw.strip():
         return raw.strip()
     return ""
+
+
+def _extract_authors(msg: dict) -> list[str]:
+    """R237bm: Crossref authors as "Family, Given" (gap C). Empty list if none."""
+    raw = msg.get("author")
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for a in raw:
+        if not isinstance(a, dict):
+            continue
+        family = a.get("family")
+        given = a.get("given")
+        if isinstance(family, str) and family.strip():
+            if isinstance(given, str) and given.strip():
+                out.append(f"{family.strip()}, {given.strip()}")
+            else:
+                out.append(family.strip())
+    return out
+
+
+def _extract_authors_openalex(data: dict) -> list[str]:
+    """R237bm: OpenAlex authorships[].author.display_name (gap C)."""
+    raw = data.get("authorships")
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for a in raw:
+        if not isinstance(a, dict):
+            continue
+        author = a.get("author")
+        if isinstance(author, dict):
+            name = author.get("display_name")
+            if isinstance(name, str) and name.strip():
+                out.append(name.strip())
+    return out
 
 
 def _extract_journal_short(msg: dict) -> str:
