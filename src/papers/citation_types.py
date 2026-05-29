@@ -108,6 +108,10 @@ class CitationDoc(BaseModel):
     confidence: CitationConfidence
     context: str | None = None
     citation_type: CitationType | None = Field(alias="citationType", default=None)
+    # R237bn (branch B): full reference listing — number in the paper's reference
+    # list + the raw reference string (so DOI-less refs are still listed).
+    number: int | None = Field(default=None)
+    raw_text: str | None = Field(alias="rawText", default=None)
 
 
 # ----------------------------------------------------------------------------
@@ -137,6 +141,8 @@ class CitationCreateInput(BaseModel):
     confidence: CitationConfidence
     context: str | None = None
     citation_type: CitationType | None = None
+    number: int | None = None
+    raw_text: str | None = None
 
 
 # ----------------------------------------------------------------------------

@@ -57,21 +57,29 @@ def generate_citation_id(
     source_paper_id: str,
     target_doi: str | None = None,
     target_title: str | None = None,
+    target_raw: str | None = None,
 ) -> str:
     """Generate deterministic Citation ID.
 
     Same (source, target) → same ID → idempotent createCitation across
     Pub/Sub retries. Critical for at-least-once delivery safety.
 
+    Precedence: DOI > title > raw reference text. The raw-text scheme (R237bn)
+    lets DOI-less / un-resolved references still get a stable ID so they can be
+    listed without colliding.
+
     Raises:
-        FatalError: if both target_doi and target_title are missing/empty.
+        FatalError: if target_doi, target_title and target_raw are all missing.
     """
     if target_doi:
         return f"{source_paper_id}:d:{_sha256_short(target_doi.lower())}"
     if target_title:
         normalized = _WHITESPACE_RE.sub(" ", target_title.lower()).strip()
         return f"{source_paper_id}:t:{_sha256_short(normalized)}"
-    raise FatalError("Citation requires targetDoi or targetTitle for ID generation")
+    if target_raw:
+        normalized = _WHITESPACE_RE.sub(" ", target_raw.lower()).strip()[:200]
+        return f"{source_paper_id}:r:{_sha256_short(normalized)}"
+    raise FatalError("Citation requires targetDoi, targetTitle or rawText for ID generation")
 
 
 def _citations_collection(db: firestore.Client, tenant_id: str) -> firestore.CollectionReference:
@@ -104,7 +112,7 @@ def create_citation(db: firestore.Client, input_: CitationCreateInput) -> Citati
         FatalError: if input is missing both targetDoi and targetTitle.
     """
     citation_id = generate_citation_id(
-        input_.source_paper_id, input_.target_doi, input_.target_title,
+        input_.source_paper_id, input_.target_doi, input_.target_title, input_.raw_text,
     )
     ref = _citations_collection(db, input_.tenant_id).document(citation_id)
     now_ms = int(time.time() * 1000)
@@ -130,6 +138,8 @@ def create_citation(db: firestore.Client, input_: CitationCreateInput) -> Citati
         confidence=input_.confidence,
         context=input_.context,
         citationType=input_.citation_type,
+        number=input_.number,
+        rawText=input_.raw_text,
     )
 
     # Confidence ranking check (idempotent dedup)
@@ -141,10 +151,21 @@ def create_citation(db: firestore.Client, input_: CitationCreateInput) -> Citati
             existing_rank = _CONFIDENCE_ORDER[existing_conf]  # type: ignore[index]
             new_rank = _CONFIDENCE_ORDER[input_.confidence]
             if existing_rank >= new_rank:
-                # Existing more trusted — preserve, return existing parsed
+                # Existing is at least as trusted — keep its confidence/metadata,
+                # but backfill the reference-listing fields (R237bn) when the
+                # existing doc predates them, so a reprocess fills numbers/raw text
+                # without downgrading anything.
+                patch: dict = {}
+                if existing_data.get("number") is None and input_.number is not None:
+                    patch["number"] = input_.number
+                if not existing_data.get("rawText") and input_.raw_text:
+                    patch["rawText"] = input_.raw_text
+                if patch:
+                    ref.update(patch)
+                    existing_data.update(patch)
                 logger.info(
-                    "citation_skip_existing id=%s existing_conf=%s new_conf=%s",
-                    citation_id, existing_conf, input_.confidence,
+                    "citation_skip_existing id=%s existing_conf=%s new_conf=%s backfill=%s",
+                    citation_id, existing_conf, input_.confidence, list(patch.keys()),
                 )
                 return CitationDoc.model_validate(existing_data)
 

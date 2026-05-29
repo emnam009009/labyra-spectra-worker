@@ -32,12 +32,13 @@ from pydantic import BaseModel, ConfigDict
 from src.papers.citation_service import (
     create_citation,
     find_internal_paper_by_doi,
+    generate_citation_id,
     list_citations_by_source,
     recompute_citation_stats,
 )
 from src.papers.citation_types import CitationCreateInput
 from src.papers.openalex import lookup_doi
-from src.papers.references_parser import extract_dois_from_text
+from src.papers.references_extractor import extract_references
 from src.papers.state import check_cancelled
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,8 @@ class CitationStepResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     dois_found: int = 0
+    references_found: int = 0
+    references_with_doi: int = 0
     citations_created: int = 0
     resolutions_linked: int = 0
     api_failures: int = 0
@@ -88,12 +91,14 @@ def run_citation_step(
 
     logger.info("citation_extract_start tenant=%s paper=%s", tenant_id, paper_id)
 
-    # 1. Extract DOIs from references section
-    refs = extract_dois_from_text(full_text, max_results=MAX_DOIS_PER_PAPER)
-    result.dois_found = len(refs)
+    # 1. Extract the full reference list (numbered; DOI optional) — R237bn.
+    refs = extract_references(full_text, max_results=MAX_DOIS_PER_PAPER)
+    result.references_found = len(refs)
+    result.references_with_doi = sum(1 for r in refs if r.doi)
+    result.dois_found = result.references_with_doi  # backward-compat field
     logger.info(
-        "citation_extract_done tenant=%s paper=%s dois_found=%d",
-        tenant_id, paper_id, len(refs),
+        "citation_extract_done tenant=%s paper=%s refs=%d with_doi=%d",
+        tenant_id, paper_id, result.references_found, result.references_with_doi,
     )
 
     if not refs:
@@ -106,55 +111,48 @@ def run_citation_step(
             )
         return result
 
-    # 2. Pre-fetch existing citations for dedup
+    # 2. Pre-fetch existing citations for dedup (by deterministic ID).
     existing = list_citations_by_source(db, tenant_id, paper_id, include_deprecated=False)
-    existing_dois: set[str] = {
-        c.target_doi.lower() for c in existing if c.target_doi
-    }
+    existing_ids: set[str] = {c.id for c in existing}
 
-    # 3. Per-DOI lookup + create
+    # 3. Per-reference lookup + create.
     created_by_final = created_by or "citation-extraction-system"
+    api_calls = 0
 
-    for idx, ref in enumerate(refs):
+    for ref in refs:
         check_cancelled(db, tenant_id, paper_id)
 
-        # Skip already-resolved (idempotent across retries)
-        if ref.doi.lower() in existing_dois:
-            logger.debug("citation_skip_existing doi=%s", ref.doi)
-            continue
+        cid = generate_citation_id(paper_id, ref.doi, None, ref.raw_text)
+        already = cid in existing_ids
 
-        # Rate limit between API calls
-        if idx > 0:
-            time.sleep(CROSSREF_RATE_LIMIT_SECONDS)
-
-        # Lookup metadata (best-effort, Crossref + OpenAlex fallback)
-        # lookup_doi itself catches network errors and returns None
         metadata = None
-        try:
-            metadata = lookup_doi(ref.doi)
-        except Exception as exc:  # noqa: BLE001 — defensive (lookup_doi shouldn't raise but just in case)
-            result.api_failures += 1
-            logger.warning(
-                "citation_lookup_unexpected_error doi=%s err=%s", ref.doi, exc,
-            )
+        internal_target = None
+        # Only hit the network for NEW DOI references (existing ones just get
+        # their number/rawText backfilled by create_citation — no API cost).
+        if ref.doi and not already:
+            if api_calls > 0:
+                time.sleep(CROSSREF_RATE_LIMIT_SECONDS)
+            api_calls += 1
+            try:
+                metadata = lookup_doi(ref.doi)
+            except Exception as exc:  # noqa: BLE001 — defensive
+                result.api_failures += 1
+                logger.warning("citation_lookup_unexpected_error doi=%s err=%s", ref.doi, exc)
+            if metadata is None:
+                result.api_failures += 1
+                logger.info("citation_lookup_no_result doi=%s", ref.doi)
+            try:
+                internal_target = find_internal_paper_by_doi(db, tenant_id, ref.doi)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("citation_resolve_failed doi=%s err=%s", ref.doi, exc)
+            if internal_target:
+                result.resolutions_linked += 1
 
-        if metadata is None:
-            result.api_failures += 1
-            logger.info("citation_lookup_no_result doi=%s", ref.doi)
+        if ref.doi:
+            confidence = "doi-exact" if metadata else "unverified"
+        else:
+            confidence = "unverified"
 
-        # Cross-reference to internal paper (if cited paper also in our DB)
-        try:
-            internal_target = find_internal_paper_by_doi(db, tenant_id, ref.doi)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "citation_resolve_failed doi=%s err=%s", ref.doi, exc,
-            )
-            internal_target = None
-
-        if internal_target:
-            result.resolutions_linked += 1
-
-        # Create citation (idempotent — deterministic ID + confidence check)
         try:
             create_citation(db, CitationCreateInput(
                 tenant_id=tenant_id,
@@ -166,15 +164,15 @@ def run_citation_step(
                 target_year=metadata.year if metadata else None,
                 target_journal=metadata.journal if metadata else None,
                 target_paper_id=internal_target,
-                metadata_source=metadata.source if metadata else "pdf-only",
-                confidence="doi-exact" if metadata else "unverified",  # R168-3.3
-                context=ref.context,
+                metadata_source=(metadata.source if metadata else ("pdf-only" if ref.doi else None)),
+                confidence=confidence,
+                context=None,
+                number=ref.number,
+                raw_text=ref.raw_text,
             ))
             result.citations_created += 1
-        except Exception as exc:  # noqa: BLE001 — per-DOI fault tolerance
-            logger.warning(
-                "citation_create_failed doi=%s err=%s", ref.doi, exc,
-            )
+        except Exception as exc:  # noqa: BLE001 — per-reference fault tolerance
+            logger.warning("citation_create_failed id=%s err=%s", cid, exc)
 
     # 4. Recompute stats (non-fatal — denormalized layer is regenerable)
     try:
