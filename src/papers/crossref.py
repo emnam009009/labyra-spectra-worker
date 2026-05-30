@@ -213,6 +213,8 @@ def lookup_doi_crossref(doi: str) -> CitationMetadata | None:
         authors=_extract_authors(msg.get("author")),
         year=_extract_year(msg),
         journal=_extract_journal(msg),
+        publisher=(msg.get("publisher") or "").strip() or None,
+        is_open_access=None,  # Crossref does not expose OA status; OpenAlex does
         is_retracted=_is_retracted(msg),
         source="crossref",
     )

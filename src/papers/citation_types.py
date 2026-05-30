@@ -49,6 +49,8 @@ class CitationMetadata(BaseModel):
     authors: list[str] | None = None
     year: int | None = None
     journal: str | None = None
+    publisher: str | None = None
+    is_open_access: bool | None = None
     is_retracted: bool = False
     source: Literal["crossref", "openalex"]
 
@@ -103,6 +105,8 @@ class CitationDoc(BaseModel):
     target_authors: list[str] | None = Field(alias="targetAuthors", default=None)
     target_year: int | None = Field(alias="targetYear", default=None)
     target_journal: str | None = Field(alias="targetJournal", default=None)
+    target_publisher: str | None = Field(alias="targetPublisher", default=None)
+    target_is_open_access: bool | None = Field(alias="targetIsOpenAccess", default=None)
     target_paper_id: str | None = Field(alias="targetPaperId", default=None)
     metadata_source: MetadataSource | None = Field(alias="metadataSource", default=None)
     confidence: CitationConfidence
@@ -136,6 +140,8 @@ class CitationCreateInput(BaseModel):
     target_authors: list[str] | None = None
     target_year: int | None = None
     target_journal: str | None = None
+    target_publisher: str | None = None
+    target_is_open_access: bool | None = None
     target_paper_id: str | None = None
     metadata_source: MetadataSource | None = None
     confidence: CitationConfidence

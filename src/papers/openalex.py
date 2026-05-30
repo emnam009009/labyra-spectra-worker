@@ -137,6 +137,94 @@ def _extract_journal_oa(raw: Any) -> str | None:
     return None
 
 
+def _extract_publisher_oa(primary_location: Any) -> str | None:
+    """Publisher from primary_location.source.host_organization_name (R237co)."""
+    if not isinstance(primary_location, dict):
+        return None
+    source = primary_location.get("source")
+    if isinstance(source, dict):
+        name = source.get("host_organization_name")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    return None
+
+
+def _extract_is_oa(open_access: Any) -> bool | None:
+    """open_access.is_oa (R237co). None when the block is absent."""
+    if isinstance(open_access, dict) and isinstance(open_access.get("is_oa"), bool):
+        return open_access["is_oa"]
+    return None
+
+
+class OaInfo(BaseModel):
+    """Publisher + Open-Access flag for one DOI (R237co batch enrich)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    publisher: str | None = None
+    is_oa: bool | None = None
+
+
+def _normalize_oa_doi(raw: Any) -> str:
+    """OpenAlex returns doi as a full URL; reduce to bare lower-case DOI."""
+    if not isinstance(raw, str):
+        return ""
+    return raw.replace("https://doi.org/", "").replace("http://doi.org/", "").strip().lower()
+
+
+def fetch_openalex_oa_batch(dois: list[str]) -> dict[str, OaInfo]:
+    """Batch-fetch publisher + is_oa for many DOIs (R237co).
+
+    OpenAlex supports `filter=doi:A|B|C` (OR), so ~50 references resolve in one
+    request. DOI lookups are free + don't consume the daily credit cap. Keyed by
+    bare lower-case DOI. Best-effort: missing/failed chunks are simply absent.
+    """
+    clean = [d.strip() for d in dois if d and d.strip()]
+    if not clean:
+        return {}
+
+    mailto = _polite_mailto()
+    api_key = get_settings().openalex_api_key
+    out: dict[str, OaInfo] = {}
+    chunk_size = 50
+    for start in range(0, len(clean), chunk_size):
+        chunk = clean[start : start + chunk_size]
+        filter_val = "|".join(chunk)
+        url = (
+            f"{OPENALEX_API_BASE}?filter=doi:{quote(filter_val, safe='|')}"
+            f"&select=doi,open_access,primary_location&per-page={chunk_size}"
+            f"&mailto={quote(mailto)}"
+        )
+        if api_key:
+            url += f"&api_key={quote(api_key)}"
+        try:
+            with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
+                res = client.get(url, headers={"Accept": "application/json"})
+        except httpx.HTTPError as exc:
+            logger.warning("openalex_oa_batch_error err=%s", exc)
+            continue
+        if res.status_code != 200:
+            logger.warning("openalex_oa_batch_http status=%s", res.status_code)
+            continue
+        try:
+            results = res.json().get("results", [])
+        except ValueError:
+            continue
+        if not isinstance(results, list):
+            continue
+        for work in results:
+            if not isinstance(work, dict):
+                continue
+            key = _normalize_oa_doi(work.get("doi"))
+            if not key:
+                continue
+            out[key] = OaInfo(
+                publisher=_extract_publisher_oa(work.get("primary_location")),
+                is_oa=_extract_is_oa(work.get("open_access")),
+            )
+    return out
+
+
 def lookup_doi_openalex(doi: str) -> CitationMetadata | None:
     """Lookup paper metadata by DOI via OpenAlex.
 
@@ -167,13 +255,16 @@ def lookup_doi_openalex(doi: str) -> CitationMetadata | None:
 
     title = payload.get("title")
     year = payload.get("publication_year")
+    primary_location = payload.get("primary_location")
 
     return CitationMetadata(
         doi=doi,
         title=title if isinstance(title, str) else None,
         authors=_extract_authors_oa(payload.get("authorships")),
         year=year if isinstance(year, int) else None,
-        journal=_extract_journal_oa(payload.get("primary_location")),
+        journal=_extract_journal_oa(primary_location),
+        publisher=_extract_publisher_oa(primary_location),
+        is_open_access=_extract_is_oa(payload.get("open_access")),
         is_retracted=bool(payload.get("is_retracted")),
         source="openalex",
     )

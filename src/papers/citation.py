@@ -38,7 +38,7 @@ from src.papers.citation_service import (
 )
 from src.papers.citation_types import CitationCreateInput
 from src.papers.crossref import CrossrefReference, fetch_crossref_references
-from src.papers.openalex import lookup_doi
+from src.papers.openalex import fetch_openalex_oa_batch, lookup_doi
 from src.papers.references_agent import extract_references_with_agent
 from src.papers.references_extractor import extract_references
 from src.papers.state import check_cancelled
@@ -80,6 +80,16 @@ def _ingest_crossref_refs(
     result.references_with_doi = sum(1 for r in refs if r.doi)
     result.dois_found = result.references_with_doi
 
+    # R237co: one batch OpenAlex call fills publisher + is_oa for all ref DOIs
+    # (Crossref-deposited reference entries carry neither). Free, ~50 DOI/call.
+    oa_batch: dict = {}
+    ref_dois = [r.doi for r in refs if r.doi]
+    if ref_dois:
+        try:
+            oa_batch = fetch_openalex_oa_batch(ref_dois)
+        except Exception as exc:  # noqa: BLE001 — best-effort enrichment
+            logger.warning("citation_oa_batch_failed paper=%s err=%s", paper_id, exc)
+
     for ref in refs:
         check_cancelled(db, tenant_id, paper_id)
 
@@ -92,6 +102,7 @@ def _ingest_crossref_refs(
             if internal_target:
                 result.resolutions_linked += 1
 
+        oa = oa_batch.get((ref.doi or "").strip().lower()) if ref.doi else None
         try:
             create_citation(db, CitationCreateInput(
                 tenant_id=tenant_id,
@@ -102,6 +113,8 @@ def _ingest_crossref_refs(
                 target_authors=ref.authors,
                 target_year=ref.year,
                 target_journal=ref.journal,
+                target_publisher=oa.publisher if oa else None,
+                target_is_open_access=oa.is_oa if oa else None,
                 target_paper_id=internal_target,
                 metadata_source="crossref",
                 confidence="doi-exact" if ref.doi else "unverified",
@@ -218,6 +231,17 @@ def run_citation_step(
     # 3. Per-reference lookup + create.
     api_calls = 0
 
+    # R237co: batch OA + publisher for all ref DOIs (one OpenAlex call, free).
+    # Crossref lookup already yields publisher; OpenAlex fills is_oa (+ publisher
+    # when Crossref had none).
+    oa_batch: dict = {}
+    ref_dois = [r.doi for r in refs if r.doi]
+    if ref_dois:
+        try:
+            oa_batch = fetch_openalex_oa_batch(ref_dois)
+        except Exception as exc:  # noqa: BLE001 — best-effort
+            logger.warning("citation_oa_batch_failed paper=%s err=%s", paper_id, exc)
+
     for ref in refs:
         check_cancelled(db, tenant_id, paper_id)
 
@@ -252,6 +276,7 @@ def run_citation_step(
         else:
             confidence = "unverified"
 
+        oa = oa_batch.get((ref.doi or "").strip().lower()) if ref.doi else None
         try:
             create_citation(db, CitationCreateInput(
                 tenant_id=tenant_id,
@@ -262,6 +287,16 @@ def run_citation_step(
                 target_authors=metadata.authors if metadata else None,
                 target_year=metadata.year if metadata else None,
                 target_journal=metadata.journal if metadata else None,
+                target_publisher=(
+                    metadata.publisher
+                    if metadata and metadata.publisher
+                    else (oa.publisher if oa else None)
+                ),
+                target_is_open_access=(
+                    metadata.is_open_access
+                    if metadata and metadata.is_open_access is not None
+                    else (oa.is_oa if oa else None)
+                ),
                 target_paper_id=internal_target,
                 metadata_source=(metadata.source if metadata else ("pdf-only" if ref.doi else None)),
                 confidence=confidence,

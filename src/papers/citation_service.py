@@ -133,6 +133,8 @@ def create_citation(db: firestore.Client, input_: CitationCreateInput) -> Citati
         targetAuthors=input_.target_authors,
         targetYear=input_.target_year,
         targetJournal=input_.target_journal,
+        targetPublisher=input_.target_publisher,
+        targetIsOpenAccess=input_.target_is_open_access,
         targetPaperId=input_.target_paper_id,
         metadataSource=input_.metadata_source,
         confidence=input_.confidence,
@@ -160,6 +162,15 @@ def create_citation(db: firestore.Client, input_: CitationCreateInput) -> Citati
                     patch["number"] = input_.number
                 if not existing_data.get("rawText") and input_.raw_text:
                     patch["rawText"] = input_.raw_text
+                # R237co: backfill publisher / OA on docs that predate them so a
+                # reprocess enriches without downgrading trusted metadata.
+                if existing_data.get("targetPublisher") is None and input_.target_publisher:
+                    patch["targetPublisher"] = input_.target_publisher
+                if (
+                    existing_data.get("targetIsOpenAccess") is None
+                    and input_.target_is_open_access is not None
+                ):
+                    patch["targetIsOpenAccess"] = input_.target_is_open_access
                 if patch:
                     ref.update(patch)
                     existing_data.update(patch)
