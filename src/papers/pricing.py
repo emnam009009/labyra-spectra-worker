@@ -58,7 +58,7 @@ def voyage_embed_cost_usd(total_tokens: int) -> float:
 
 
 # ----------------------------------------------------------------------------
-# Anthropic Claude Haiku 4.5 — verified anthropic.com pricing (2026-05-15)
+# Anthropic Claude Haiku 4.5 — verified anthropic.com pricing (2026-05-30)
 # Used for: enrichment step + metadata extraction (cheap tier LLM tasks)
 # ----------------------------------------------------------------------------
 HAIKU_45_INPUT_USD_PER_M: float = 1.00
