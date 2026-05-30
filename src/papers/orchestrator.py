@@ -367,6 +367,9 @@ def process_paper(
                     "journalIssn": journal_result.journal_issn,
                     "journalSourceId": journal_result.source_id,
                     "journalResolvedAt": journal_result.resolved_at,
+                    # R237cc: DOI verification — False means the DOI didn't
+                    # resolve at Crossref or OpenAlex (likely an OCR error).
+                    "doiVerified": journal_result.doi_found,
                 }
                 # R237bw: only set siUrl when Crossref actually has an SI relation,
                 # so a reprocess never clobbers a user-entered link with "".

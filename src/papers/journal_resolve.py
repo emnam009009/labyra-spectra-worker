@@ -70,6 +70,12 @@ class JournalResolveResult(BaseModel):
     """Publisher name from Crossref `message.publisher` (R237bx). Authoritative
     for journal articles (e.g. 'Elsevier BV', 'Royal Society of Chemistry')."""
 
+    doi_found: bool = False
+    """R237cc: True if the DOI resolves to a work in Crossref OR OpenAlex.
+    False means the DOI is almost certainly wrong (e.g. OCR error like
+    10.1058 for 10.1038) — Crossref is the primary DOI registry, so a 404
+    there is a strong signal. Used to flag unverified DOIs in the UI."""
+
     resolved_at: int = 0
     """Epoch ms when resolution completed."""
 
@@ -95,6 +101,8 @@ def resolve_journal_from_doi(doi: str) -> JournalResolveResult:
     # Try Crossref first
     cr_data = _fetch_crossref(doi)
     if cr_data is not None:
+        # The DOI resolves at Crossref → it exists (R237cc).
+        result.doi_found = True
         # SI link (R237bw) + publisher (R237bx) — read from the same message.
         result.si_url = extract_supplement_url(cr_data) or ""
         pub = cr_data.get("publisher")
@@ -115,6 +123,7 @@ def resolve_journal_from_doi(doi: str) -> JournalResolveResult:
     # Fall back to OpenAlex
     oa_data = _fetch_openalex(doi)
     if oa_data is not None:
+        result.doi_found = True
         journal, journal_short, issn = _parse_openalex(oa_data)
         if journal:
             result.journal = journal
