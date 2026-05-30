@@ -13,10 +13,12 @@ caller (citation step) catches and counts as apiFailures.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 from urllib.parse import quote
 
 import httpx
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.config import get_settings
 from src.papers.citation_types import CitationMetadata
@@ -133,3 +135,90 @@ def lookup_doi_crossref(doi: str) -> CitationMetadata | None:
         is_retracted=_is_retracted(msg),
         source="crossref",
     )
+
+
+class CrossrefReference(BaseModel):
+    """One reference from a paper's Crossref-deposited reference[] list.
+
+    Crossref reference entries are publisher-deposited (authoritative) and carry
+    enough metadata to display directly — no per-DOI lookup needed. DOI-less
+    entries still carry `unstructured` (the raw reference string) so they can be
+    listed too.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    number: int = Field(ge=1)
+    doi: str | None = None
+    title: str | None = None
+    authors: list[str] | None = None
+    year: int | None = None
+    journal: str | None = None
+    raw_text: str | None = None  # Crossref `unstructured` (full reference string)
+
+
+def _ref_year(raw: Any) -> int | None:
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str):
+        m = re.search(r"\b(1[5-9]\d{2}|20\d{2})\b", raw)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def fetch_crossref_references(doi: str) -> list[CrossrefReference]:
+    """Fetch the paper's own reference list from Crossref (source A).
+
+    Returns ordered references (incl. DOI-less ones via `unstructured`).
+    Empty list when the DOI is unknown (404) or the publisher did not deposit
+    references (closed/limited) — caller then falls back to PDF extraction.
+
+    Raises:
+        httpx.HTTPError: network / 5xx (caller catches).
+    """
+    url = f"{CROSSREF_API_BASE}/{quote(doi, safe='')}"
+    headers = {"User-Agent": _user_agent(), "Accept": "application/json"}
+    with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
+        res = client.get(url, headers=headers)
+
+    if res.status_code == 404:
+        return []
+    if res.status_code >= 400:
+        raise httpx.HTTPError(f"crossref_http_{res.status_code}")
+
+    payload = res.json()
+    msg = payload.get("message") if isinstance(payload, dict) else None
+    refs = msg.get("reference") if isinstance(msg, dict) else None
+    if not isinstance(refs, list):
+        return []
+
+    out: list[CrossrefReference] = []
+    for i, r in enumerate(refs):
+        if not isinstance(r, dict):
+            continue
+        ref_doi = r.get("DOI")
+        ref_doi = ref_doi.strip().lower() if isinstance(ref_doi, str) and ref_doi.strip() else None
+        title = r.get("article-title") or r.get("volume-title") or r.get("series-title")
+        title = title.strip() if isinstance(title, str) and title.strip() else None
+        author = r.get("author")
+        authors = [author.strip()] if isinstance(author, str) and author.strip() else None
+        journal = r.get("journal-title")
+        journal = journal.strip() if isinstance(journal, str) and journal.strip() else None
+        raw = r.get("unstructured")
+        raw = raw.strip()[:600] if isinstance(raw, str) and raw.strip() else None
+        # Skip entries with no usable content at all.
+        if not (ref_doi or title or raw):
+            continue
+        out.append(
+            CrossrefReference(
+                number=i + 1,
+                doi=ref_doi,
+                title=title,
+                authors=authors,
+                year=_ref_year(r.get("year")),
+                journal=journal,
+                raw_text=raw,
+            )
+        )
+    return out

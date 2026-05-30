@@ -37,6 +37,7 @@ from src.papers.citation_service import (
     recompute_citation_stats,
 )
 from src.papers.citation_types import CitationCreateInput
+from src.papers.crossref import CrossrefReference, fetch_crossref_references
 from src.papers.openalex import lookup_doi
 from src.papers.references_extractor import extract_references
 from src.papers.state import check_cancelled
@@ -60,44 +61,128 @@ class CitationStepResult(BaseModel):
     api_failures: int = 0
 
 
+def _ingest_crossref_refs(
+    db: firestore.Client,
+    tenant_id: str,
+    paper_id: str,
+    created_by_final: str,
+    refs: list[CrossrefReference],
+    result: CitationStepResult,
+) -> CitationStepResult:
+    """Create citations from Crossref-deposited references (source A).
+
+    Metadata (title/authors/year/journal) is already in each entry, so there is
+    NO per-DOI network lookup here — only the cheap internal cross-reference
+    (find_internal_paper_by_doi) for the in-library badge.
+    """
+    result.references_found = len(refs)
+    result.references_with_doi = sum(1 for r in refs if r.doi)
+    result.dois_found = result.references_with_doi
+
+    for ref in refs:
+        check_cancelled(db, tenant_id, paper_id)
+
+        internal_target = None
+        if ref.doi:
+            try:
+                internal_target = find_internal_paper_by_doi(db, tenant_id, ref.doi)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("citation_resolve_failed doi=%s err=%s", ref.doi, exc)
+            if internal_target:
+                result.resolutions_linked += 1
+
+        try:
+            create_citation(db, CitationCreateInput(
+                tenant_id=tenant_id,
+                created_by=created_by_final,
+                source_paper_id=paper_id,
+                target_doi=ref.doi,
+                target_title=ref.title,
+                target_authors=ref.authors,
+                target_year=ref.year,
+                target_journal=ref.journal,
+                target_paper_id=internal_target,
+                metadata_source="crossref",
+                confidence="doi-exact" if ref.doi else "unverified",
+                context=None,
+                number=ref.number,
+                raw_text=ref.raw_text,
+            ))
+            result.citations_created += 1
+        except Exception as exc:  # noqa: BLE001 — per-reference fault tolerance
+            logger.warning("citation_create_failed number=%s err=%s", ref.number, exc)
+
+    try:
+        recompute_citation_stats(db, tenant_id, paper_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("citation_stats_failed tenant=%s paper=%s err=%s", tenant_id, paper_id, exc)
+
+    logger.info(
+        "citation_step_done tenant=%s paper=%s source=crossref refs=%d created=%d linked=%d",
+        tenant_id, paper_id, result.references_found, result.citations_created,
+        result.resolutions_linked,
+    )
+    return result
+
+
 def run_citation_step(
     db: firestore.Client,
     tenant_id: str,
     paper_id: str,
     created_by: str,
     full_text: str,
+    self_doi: str | None = None,
 ) -> CitationStepResult:
-    """Run citation extraction for a paper.
+    """Run citation (reference list) extraction for a paper.
 
-    Best-effort: per-DOI lookup failures are caught + logged (api_failures
-    counter), but DOI relationship is still preserved (citation created
-    with metadataSource='pdf-only').
+    Two sources (ADR-017; R237bt):
+      A. Crossref reference[] of the paper itself (when self_doi is known and the
+         publisher deposited references) — authoritative, ordered, carries
+         title/authors/year so no per-DOI lookup is needed, and lists DOI-less
+         references too. Preferred.
+      B. PDF DOI-anchored extraction (extract_references) — deterministic
+         fallback when A is empty (no self DOI / references closed / 404). Each
+         DOI is then resolved via lookup_doi (Crossref→OpenAlex).
 
-    Args:
-        db: Firestore client
-        tenant_id: tenant
-        paper_id: source paper ID
-        created_by: user/system that triggered processing (for ProvBase)
-        full_text: concatenated OCR text from all pages
+    Best-effort: per-DOI failures are caught + counted (api_failures); the DOI
+    relationship is still preserved.
 
     Returns:
         CitationStepResult with counters.
 
     Raises:
-        CancelledError: user cancelled mid-extraction (per check_cancelled
-                        between DOI lookups).
+        CancelledError: user cancelled mid-extraction.
     """
     result = CitationStepResult()
+    created_by_final = created_by or "citation-extraction-system"
 
-    logger.info("citation_extract_start tenant=%s paper=%s", tenant_id, paper_id)
+    logger.info("citation_extract_start tenant=%s paper=%s self_doi=%r", tenant_id, paper_id, self_doi)
 
-    # 1. Extract the full reference list (numbered; DOI optional) — R237bn.
+    # ── Source A: the paper's own Crossref reference list ────────────────
+    if self_doi:
+        crossref_refs: list = []
+        try:
+            crossref_refs = fetch_crossref_references(self_doi)
+        except Exception as exc:  # noqa: BLE001 — network/5xx; fall back to PDF
+            result.api_failures += 1
+            logger.warning("crossref_refs_failed doi=%s err=%s", self_doi, exc)
+        if crossref_refs:
+            logger.info(
+                "citation_source_crossref tenant=%s paper=%s refs=%d",
+                tenant_id, paper_id, len(crossref_refs),
+            )
+            return _ingest_crossref_refs(
+                db, tenant_id, paper_id, created_by_final, crossref_refs, result
+            )
+
+    # ── Source B (fallback): PDF DOI-anchored extraction ─────────────────
+    # 1. Extract the full reference list (numbered; DOI optional) — R237bn/bo.
     refs = extract_references(full_text, max_results=MAX_DOIS_PER_PAPER)
     result.references_found = len(refs)
     result.references_with_doi = sum(1 for r in refs if r.doi)
     result.dois_found = result.references_with_doi  # backward-compat field
     logger.info(
-        "citation_extract_done tenant=%s paper=%s refs=%d with_doi=%d",
+        "citation_extract_done tenant=%s paper=%s refs=%d with_doi=%d (source=pdf)",
         tenant_id, paper_id, result.references_found, result.references_with_doi,
     )
 
@@ -116,7 +201,6 @@ def run_citation_step(
     existing_ids: set[str] = {c.id for c in existing}
 
     # 3. Per-reference lookup + create.
-    created_by_final = created_by or "citation-extraction-system"
     api_calls = 0
 
     for ref in refs:

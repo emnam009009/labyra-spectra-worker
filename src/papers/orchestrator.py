@@ -450,6 +450,7 @@ def process_paper(
                 db, tenant_id, paper_id,
                 created_by=created_by or paper.created_by,
                 full_text=ocr_result.full_text,
+                self_doi=(meta.doi or "").strip() or None,
             )
             _log_event(
                 "step_citation_done",
