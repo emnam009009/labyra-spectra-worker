@@ -336,6 +336,10 @@ def process_paper(
                     "journalSourceId": journal_result.source_id,
                     "journalResolvedAt": journal_result.resolved_at,
                 }
+                # R237bw: only set siUrl when Crossref actually has an SI relation,
+                # so a reprocess never clobbers a user-entered link with "".
+                if journal_result.si_url:
+                    journal_update["siUrl"] = journal_result.si_url
                 # R228 + R237bm (gap A/C): the publisher's title is authoritative
                 # for OCR typos (e.g. 'Phage'→'Please'), BUT a hallucinated/wrong
                 # DOI would resolve to a DIFFERENT paper. So only override when the

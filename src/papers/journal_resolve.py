@@ -18,6 +18,8 @@ from typing import Optional
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.papers.crossref import extract_supplement_url
+
 logger = logging.getLogger(__name__)
 
 CROSSREF_API_BASE = "https://api.crossref.org/works"
@@ -60,6 +62,10 @@ class JournalResolveResult(BaseModel):
     source_id: str = ""
     """'crossref' | 'openalex' | '' if both failed."""
 
+    si_url: str = ""
+    """Best-effort Supplementary Information URL from Crossref `relation`
+    (R237bw). Usually empty — publishers rarely deposit SI relations."""
+
     resolved_at: int = 0
     """Epoch ms when resolution completed."""
 
@@ -85,6 +91,8 @@ def resolve_journal_from_doi(doi: str) -> JournalResolveResult:
     # Try Crossref first
     cr_data = _fetch_crossref(doi)
     if cr_data is not None:
+        # SI link (R237bw) — read from the same message; usually empty.
+        result.si_url = extract_supplement_url(cr_data) or ""
         journal = _extract_journal(cr_data)
         journal_short = _extract_journal_short(cr_data)
         issn = _extract_issn(cr_data)

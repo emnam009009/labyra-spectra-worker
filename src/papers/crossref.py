@@ -167,6 +167,39 @@ def _ref_year(raw: Any) -> int | None:
     return None
 
 
+_SUPPLEMENT_REL_KEYS = ("is-supplemented-by", "has-supplement", "has-related-material")
+
+
+def extract_supplement_url(msg: dict[str, Any]) -> str | None:
+    """Best-effort Supplementary Information link from a Crossref message's
+    `relation` field (R237bw). Returns the first SI-style related item as a URL.
+
+    NOTE: publishers rarely deposit SI relations (relation is mostly used for
+    data/software), so this is usually empty for materials-science papers — the
+    manual link (paper.siUrl) remains the primary source.
+    """
+    rel = msg.get("relation")
+    if not isinstance(rel, dict):
+        return None
+    for key in _SUPPLEMENT_REL_KEYS:
+        items = rel.get(key)
+        if not isinstance(items, list):
+            continue
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            idv = it.get("id")
+            if not isinstance(idv, str) or not idv.strip():
+                continue
+            idv = idv.strip()
+            id_type = str(it.get("id-type") or "").lower()
+            if id_type == "doi":
+                return f"https://doi.org/{idv}"
+            if id_type in ("uri", "url") or idv.startswith("http"):
+                return idv
+    return None
+
+
 def fetch_crossref_references(doi: str) -> list[CrossrefReference]:
     """Fetch the paper's own reference list from Crossref (source A).
 
