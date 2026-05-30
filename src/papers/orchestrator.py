@@ -317,6 +317,38 @@ def process_paper(
                 tenant_id, paper_id, exc,
             )
 
+        # ── STEP 1d-2: OpenAlex topic (authoritative class.) ── R237bz
+        # Option B: OpenAlex Domain→Field→Subfield→Topic is the PRIMARY
+        # classification (badge + filter); the Gemini taxonomy (1d) is kept for
+        # materials-specific subtopics. Free via DOI lookup, so only when the
+        # paper has a DOI; no DOI → Gemini-only fallback. Best-effort.
+        try:
+            self_doi = (meta.doi or "").strip()
+            if self_doi:
+                from src.papers.openalex import fetch_openalex_topic
+
+                topic = fetch_openalex_topic(self_doi)
+                if topic and (topic.field or topic.topic):
+                    db.document(f"tenants/{tenant_id}/papers/{paper_id}").update({
+                        "openalexDomain": topic.domain,
+                        "openalexField": topic.field,
+                        "openalexSubfield": topic.subfield,
+                        "openalexTopic": topic.topic,
+                        "openalexTopicScore": topic.score,
+                        "openalexTopicId": topic.topic_id,
+                    })
+                    logger.info(
+                        "openalex_topic_set tenant=%s paper=%s field=%r subfield=%r "
+                        "topic=%r score=%.3f",
+                        tenant_id, paper_id, topic.field, topic.subfield,
+                        topic.topic, topic.score,
+                    )
+        except Exception as exc:  # noqa: BLE001 — best-effort
+            logger.warning(
+                "openalex_topic_failed tenant=%s paper=%s err=%s — continuing",
+                tenant_id, paper_id, exc,
+            )
+
         # ── STEP 1e: Journal metadata resolution (R179-2) ────
         # @r179-2-applied
         # @r179-5-applied: re-indented INSIDE try block

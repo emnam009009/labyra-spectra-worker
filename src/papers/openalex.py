@@ -16,6 +16,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.config import get_settings
 from src.papers.citation_types import CitationMetadata
@@ -33,6 +34,80 @@ def _polite_mailto() -> str:
         settings.openalex_polite_mailto
         or settings.crossref_polite_mailto
         or "labyra-platform@github.io"
+    )
+
+
+class OpenAlexTopic(BaseModel):
+    """Authoritative classification from OpenAlex's `primary_topic` (R237bz).
+
+    OpenAlex assigns every work a 4-level path (Domain → Field → Subfield →
+    Topic) via an ML model trained on title/abstract/citations/journal, in
+    collaboration with CWTS Leiden. More trustworthy than a single Gemini
+    guess. All fields default empty so a partial payload never raises.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    topic_id: str = Field(default="", alias="topicId")
+    topic: str = ""
+    subfield: str = ""
+    field: str = ""
+    domain: str = ""
+    score: float = 0.0
+
+
+def _oa_name(block: Any) -> str:
+    """display_name of a {id, display_name} sub-object, '' if absent."""
+    if isinstance(block, dict):
+        name = block.get("display_name")
+        if isinstance(name, str):
+            return name.strip()
+    return ""
+
+
+def fetch_openalex_topic(doi: str) -> OpenAlexTopic | None:
+    """Look up a work by DOI and return its primary_topic path.
+
+    Best-effort: returns None on 404 / any error so classification stays
+    non-blocking. Looking up a single work by DOI is FREE on OpenAlex
+    (singleton endpoint), but a key is still required since 2026-02-13.
+    """
+    clean = (doi or "").strip()
+    if not clean:
+        return None
+    settings = get_settings()
+    url = (
+        f"{OPENALEX_API_BASE}/doi:{quote(clean, safe='')}"
+        f"?select=primary_topic&mailto={quote(_polite_mailto())}"
+    )
+    if settings.openalex_api_key:
+        url += f"&api_key={quote(settings.openalex_api_key)}"
+    try:
+        with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
+            res = client.get(url, headers={"Accept": "application/json"})
+    except httpx.HTTPError as exc:
+        logger.warning("openalex_topic_fetch_error doi=%s err=%s", clean, exc)
+        return None
+    if res.status_code == 404:
+        return None
+    if res.status_code >= 400:
+        logger.warning("openalex_topic_http doi=%s status=%s", clean, res.status_code)
+        return None
+    try:
+        payload = res.json()
+    except ValueError:
+        return None
+    pt = payload.get("primary_topic") if isinstance(payload, dict) else None
+    if not isinstance(pt, dict):
+        return None
+    score = pt.get("score")
+    return OpenAlexTopic(
+        topicId=str(pt.get("id") or "").strip(),
+        topic=str(pt.get("display_name") or "").strip(),
+        subfield=_oa_name(pt.get("subfield")),
+        field=_oa_name(pt.get("field")),
+        domain=_oa_name(pt.get("domain")),
+        score=float(score) if isinstance(score, (int, float)) else 0.0,
     )
 
 
