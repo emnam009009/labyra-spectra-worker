@@ -66,6 +66,10 @@ class JournalResolveResult(BaseModel):
     """Best-effort Supplementary Information URL from Crossref `relation`
     (R237bw). Usually empty — publishers rarely deposit SI relations."""
 
+    publisher: str = ""
+    """Publisher name from Crossref `message.publisher` (R237bx). Authoritative
+    for journal articles (e.g. 'Elsevier BV', 'Royal Society of Chemistry')."""
+
     resolved_at: int = 0
     """Epoch ms when resolution completed."""
 
@@ -91,8 +95,11 @@ def resolve_journal_from_doi(doi: str) -> JournalResolveResult:
     # Try Crossref first
     cr_data = _fetch_crossref(doi)
     if cr_data is not None:
-        # SI link (R237bw) — read from the same message; usually empty.
+        # SI link (R237bw) + publisher (R237bx) — read from the same message.
         result.si_url = extract_supplement_url(cr_data) or ""
+        pub = cr_data.get("publisher")
+        if isinstance(pub, str) and pub.strip():
+            result.publisher = pub.strip()
         journal = _extract_journal(cr_data)
         journal_short = _extract_journal_short(cr_data)
         issn = _extract_issn(cr_data)

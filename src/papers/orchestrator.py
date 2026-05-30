@@ -340,6 +340,11 @@ def process_paper(
                 # so a reprocess never clobbers a user-entered link with "".
                 if journal_result.si_url:
                     journal_update["siUrl"] = journal_result.si_url
+                # R237bx: publisher from Crossref (authoritative for articles).
+                # Only when present; this branch runs only when the paper has a
+                # DOI, so a book's cover-derived publisher (Gemini) isn't clobbered.
+                if journal_result.publisher:
+                    journal_update["publisher"] = journal_result.publisher
                 # R228 + R237bm (gap A/C): the publisher's title is authoritative
                 # for OCR typos (e.g. 'Phage'→'Please'), BUT a hallucinated/wrong
                 # DOI would resolve to a DIFFERENT paper. So only override when the
