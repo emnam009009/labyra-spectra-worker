@@ -1,28 +1,32 @@
-"""Reference-list extraction (R237bn, branch B Phase 1).
+"""Reference-list extraction — DOI-anchored (R237bo, branch B Phase 1, revised).
 
-Goal (user requirements #3/#4): list ALL references in a paper, numbered in the
-paper's own order, with the DOI when present — not just the DOI-bearing ones.
+Goal (user req #3/#4, revised): list the paper's references that carry a DOI,
+numbered in order of appearance, each with the raw reference line — so the UI can
+show a proper numbered reference list (not just bare DOIs).
 
-The existing extract_dois_from_text() only captures DOI-format strings (dropping
-any reference without a DOI) and has no ordering. This module parses the
-references section into ordered entries, each keeping the raw reference text so
-nothing is lost; the DOI (if any) is pulled with the repo's existing regex.
+WHY DOI-ANCHORED (decision A, after measuring on real papers):
+The first attempt split the references section by line-start markers ([1]/1./(1))
+plus a paragraph fallback. On real papers it failed two ways:
+  - Many papers (reviews, Elsevier/Frontiers author-year style) have NO numbered
+    markers and the OCR often drops the literal "References" header, so the
+    section boundary is lost.
+  - With no boundary, marker/paragraph splitting scanned the whole body and
+    turned headings ("# 2.4 …"), tables ("Table 3 …") and figures into fake
+    "references" — observed 191 entries for one paper, ~half rubbish.
 
-Design (Trust > Coverage, deterministic — no LLM):
-  - We do NOT parse author/title/year fields here. Rule/regex field-parsing has
-    low recall (literature: F1 ≈ 0.33 vs GROBID 0.89); doing it badly would
-    invent data. For DOI-bearing refs the authoritative author/title/year comes
-    from Crossref/OpenAlex (lookup_doi). For DOI-less refs we keep the raw text
-    so the reference is still listed + numbered, and can be enriched later
-    (GROBID/Anystyle) without re-OCR.
-  - Primary strategy: split on line-start numeric markers ([1] / (1) / 1.).
-  - Fallback (un-numbered / author-year lists): split on blank lines, number by
-    order of appearance.
+A reference without a DOI cannot be told apart from body text deterministically
+once the header is gone, and guessing produces rubbish. So we anchor on the DOI:
+a DOI is hard evidence that the surrounding line is a citation. This:
+  - kills the heading/table rubbish (no DOI → not captured),
+  - never does worse than the old extract_dois_from_text (same DOIs found; we
+    just add a number + the raw reference line),
+  - is deterministic, $0, reuses the repo's DOI regex + section finder.
 
-Reuses _find_references_section_start, _DOI_SCAN_RE, _DOI_VALIDATE_RE,
-_TRAILING_PUNCT_RE, _WHITESPACE_RE from references_parser.py (one source of truth).
+Trade-off (accepted): references with NO DOI are not listed. Most materials-
+science references carry a DOI; this is the safe failure (missing, never wrong).
+Enriching DOI-less refs later (GROBID/Anystyle) would not need re-OCR.
 
-@phase R237bn
+@phase R237bo  (supersedes the marker-split R237bn)
 """
 from __future__ import annotations
 
@@ -38,97 +42,69 @@ from src.papers.references_parser import (
     _find_references_section_start,
 )
 
-DEFAULT_MAX_REFERENCES = 300  # meta-analyses can be long; safety cap
-RAW_TEXT_CAP = 600  # a single reference is short; cap stored text
-MIN_REF_LEN = 20  # fallback: ignore fragments shorter than this
-MIN_NUMBERED_MARKERS = 3  # need at least this many to trust numbered-split
-
-# Line-start reference markers: "[12]", "(12)", or "12." followed by whitespace.
-# MULTILINE so only line beginnings match (mid-line "[12]" citations ignored).
-_ENTRY_MARKER_RE = re.compile(
-    r"^[ \t]*(?:\[(\d{1,4})\]|\((\d{1,4})\)|(\d{1,4})\.)[ \t]+",
-    re.MULTILINE,
-)
+DEFAULT_MAX_REFERENCES = 300  # safety cap (meta-analyses can be long)
+RAW_TEXT_CAP = 600  # a single reference line is short; cap stored text
 
 
 class ExtractedReferenceEntry(BaseModel):
-    """One reference from the paper's reference list (numbered, raw, optional DOI)."""
+    """One DOI-bearing reference: position, raw line, DOI."""
 
     model_config = ConfigDict(extra="forbid")
 
     number: int = Field(ge=1)
-    """Position in the paper's reference list (1-based)."""
-
     raw_text: str
-    """The reference string as printed (whitespace-normalised, capped)."""
-
-    doi: str | None = None
-    """DOI if one appears in this entry, else None."""
+    doi: str  # always present (entries are anchored on a DOI)
 
 
 def _clean(text: str) -> str:
     return _WHITESPACE_RE.sub(" ", text).strip()
 
 
-def _doi_in(text: str) -> str | None:
-    m = _DOI_SCAN_RE.search(text)
-    if not m:
-        return None
-    doi = _TRAILING_PUNCT_RE.sub("", m.group(0))
-    return doi if _DOI_VALIDATE_RE.match(doi) else None
-
-
-def _make_entry(number: int, raw: str) -> ExtractedReferenceEntry:
-    return ExtractedReferenceEntry(
-        number=number,
-        raw_text=raw[:RAW_TEXT_CAP],
-        doi=_doi_in(raw),
-    )
-
-
 def extract_references(
     full_text: str,
     max_results: int = DEFAULT_MAX_REFERENCES,
 ) -> list[ExtractedReferenceEntry]:
-    """Parse the references section into ordered entries. Best-effort, never raises.
+    """Extract DOI-bearing references in order, with the raw reference line.
 
-    Args:
-        full_text: concatenated OCR text from all pages.
-        max_results: safety cap on number of entries.
+    Scans the references section when its header is present (more precise),
+    otherwise the whole text — safe either way because only DOI-bearing lines
+    are captured. Deduplicates by DOI; numbers by order of appearance.
 
-    Returns:
-        Ordered list of ExtractedReferenceEntry (may be empty).
+    Best-effort, never raises.
     """
     if not full_text or not isinstance(full_text, str):
         return []
 
     start = _find_references_section_start(full_text)
-    section = full_text[start:] if start >= 0 else full_text
+    scan = full_text[start:] if start >= 0 else full_text
 
-    markers = list(_ENTRY_MARKER_RE.finditer(section))
     entries: list[ExtractedReferenceEntry] = []
+    seen: set[str] = set()
 
-    if len(markers) >= MIN_NUMBERED_MARKERS:
-        # Numbered-split: each marker begins an entry that runs to the next.
-        for i, m in enumerate(markers):
-            if len(entries) >= max_results:
-                break
-            number = int(m.group(1) or m.group(2) or m.group(3))
-            body_start = m.end()
-            body_end = markers[i + 1].start() if i + 1 < len(markers) else len(section)
-            raw = _clean(section[body_start:body_end])
-            if raw:
-                entries.append(_make_entry(number, raw))
-        return entries
-
-    # Fallback: blank-line paragraphs, numbered by appearance.
-    n = 0
-    for chunk in re.split(r"\n\s*\n", section):
-        raw = _clean(chunk)
-        if len(raw) < MIN_REF_LEN:
-            continue  # skips the bare "References" header + fragments
-        n += 1
-        if n > max_results:
+    for m in _DOI_SCAN_RE.finditer(scan):
+        if len(entries) >= max_results:
             break
-        entries.append(_make_entry(n, raw))
+        doi = _TRAILING_PUNCT_RE.sub("", m.group(0))
+        if not _DOI_VALIDATE_RE.match(doi):
+            continue
+        key = doi.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        # raw_text = the line (between newlines) that contains the DOI.
+        line_start = scan.rfind("\n", 0, m.start()) + 1
+        line_end = scan.find("\n", m.end())
+        if line_end == -1:
+            line_end = len(scan)
+        raw = _clean(scan[line_start:line_end])
+
+        entries.append(
+            ExtractedReferenceEntry(
+                number=len(entries) + 1,
+                raw_text=raw[:RAW_TEXT_CAP],
+                doi=doi,
+            )
+        )
+
     return entries
