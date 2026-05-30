@@ -73,6 +73,10 @@ def lookup_doi_openalex(doi: str) -> CitationMetadata | None:
     """
     mailto = _polite_mailto()
     url = f"{OPENALEX_API_BASE}/doi:{quote(doi, safe='')}?mailto={quote(mailto)}"
+    # OpenAlex requires an API key since 2026-02-13 (no key → 100 credits/day).
+    api_key = get_settings().openalex_api_key
+    if api_key:
+        url += f"&api_key={quote(api_key)}"
 
     with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
         res = client.get(url, headers={"Accept": "application/json"})

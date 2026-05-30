@@ -39,6 +39,7 @@ from src.papers.citation_service import (
 from src.papers.citation_types import CitationCreateInput
 from src.papers.crossref import CrossrefReference, fetch_crossref_references
 from src.papers.openalex import lookup_doi
+from src.papers.references_agent import extract_references_with_agent
 from src.papers.references_extractor import extract_references
 from src.papers.state import check_cancelled
 
@@ -187,14 +188,28 @@ def run_citation_step(
     )
 
     if not refs:
-        # R168-3.6: still create _stats doc with count=0 for UI queries
-        try:
-            recompute_citation_stats(db, tenant_id, paper_id)
-        except Exception as exc:  # noqa: BLE001 — non-blocking, best-effort
-            logger.warning(
-                "stats_recompute_failed_empty paper=%s err=%s", paper_id, exc
+        # Source C (last resort): A (Crossref) and B (PDF DOI-anchored) both
+        # empty — let the agent structure the references section. DOIs returned
+        # are verified verbatim inside references_agent (no fabrication).
+        agent_refs, _in_tok, _out_tok = extract_references_with_agent(full_text)
+        if agent_refs:
+            logger.info(
+                "citation_source_agent tenant=%s paper=%s refs=%d",
+                tenant_id, paper_id, len(agent_refs),
             )
-        return result
+            refs = agent_refs
+            result.references_found = len(refs)
+            result.references_with_doi = sum(1 for r in refs if r.doi)
+            result.dois_found = result.references_with_doi
+        else:
+            # R168-3.6: still create _stats doc with count=0 for UI queries
+            try:
+                recompute_citation_stats(db, tenant_id, paper_id)
+            except Exception as exc:  # noqa: BLE001 — non-blocking, best-effort
+                logger.warning(
+                    "stats_recompute_failed_empty paper=%s err=%s", paper_id, exc
+                )
+            return result
 
     # 2. Pre-fetch existing citations for dedup (by deterministic ID).
     existing = list_citations_by_source(db, tenant_id, paper_id, include_deprecated=False)

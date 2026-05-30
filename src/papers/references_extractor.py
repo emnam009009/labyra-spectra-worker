@@ -53,7 +53,7 @@ class ExtractedReferenceEntry(BaseModel):
 
     number: int = Field(ge=1)
     raw_text: str
-    doi: str  # always present (entries are anchored on a DOI)
+    doi: str | None = None  # present for DOI-anchored (B); may be None from agent (C)
 
 
 def _clean(text: str) -> str:

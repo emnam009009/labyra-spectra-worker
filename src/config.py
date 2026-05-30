@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     # Empty string falls back to default 'labyra-platform@github.io' in clients.
     crossref_polite_mailto: str = ""
     openalex_polite_mailto: str = ""
+    openalex_api_key: str = ""  # OpenAlex requires a key since 2026-02-13 (free)
 
     default_locale: str = "en"
 
