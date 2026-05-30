@@ -152,6 +152,21 @@ def process_paper(
                         "self_doi_recovered tenant=%s paper=%s doi=%r source=%s",
                         tenant_id, paper_id, recovered.doi, recovered.source,
                     )
+            # R237cg: still no DOI + we have a title → reverse-lookup at Crossref
+            # by bibliographic metadata. Strict title match (Jaccard ≥ 0.7) so a
+            # wrong DOI is never attached. The recovered DOI gets verified +
+            # enriched downstream like any other.
+            if not (meta.doi or "").strip() and (meta.title or "").strip():
+                from src.papers.crossref import reverse_lookup_doi
+
+                rev_doi = reverse_lookup_doi(meta.title, meta.authors, meta.year)
+                if rev_doi:
+                    meta.doi = rev_doi
+                    self_doi_source = "crossref-title"
+                    logger.info(
+                        "self_doi_reverse_lookup tenant=%s paper=%s doi=%r",
+                        tenant_id, paper_id, rev_doi,
+                    )
             # Persist input length + output snapshot to Firestore for offline debug
             try:
                 db.document(f"tenants/{tenant_id}/papers/{paper_id}").update({

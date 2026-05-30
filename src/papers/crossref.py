@@ -39,6 +39,87 @@ def _user_agent() -> str:
     return f"Labyra/1.0 (mailto:{_polite_mailto()})"
 
 
+# R237cg: minimum title token-set Jaccard to ACCEPT a reverse-looked-up DOI.
+# High on purpose — a wrong DOI is worse than no DOI (poisons topic + references
+# + verification). 0.7 ≈ titles share most significant words.
+REVERSE_MATCH_THRESHOLD = 0.7
+
+
+def reverse_lookup_doi(
+    title: str,
+    authors: list[str] | None = None,
+    year: int | None = None,
+) -> str | None:
+    """Find a paper's DOI by querying Crossref with bibliographic metadata.
+
+    Used when no DOI is printed in the PDF (Gemini + page-text scan both failed).
+    Queries `query.bibliographic` (title + first-author surname + year, the mode
+    Crossref recommends for citation lookup) and returns a DOI ONLY when a
+    candidate's title matches strongly (Jaccard >= REVERSE_MATCH_THRESHOLD).
+    Returns None on weak match or any error — never guesses.
+
+    @phase R237cg
+    """
+    from src.papers.google_books import jaccard_similarity
+
+    clean_title = (title or "").strip()
+    if len(clean_title) < 10:  # too short to disambiguate reliably
+        return None
+
+    query_parts = [clean_title]
+    if authors:
+        first = (authors[0] or "").strip()
+        if first:
+            query_parts.append(first)
+    if year:
+        query_parts.append(str(year))
+    query = " ".join(query_parts)
+
+    url = (
+        f"{CROSSREF_API_BASE}?query.bibliographic={quote(query)}"
+        f"&rows=3&select=DOI,title,author,issued"
+    )
+    headers = {"User-Agent": _user_agent(), "Accept": "application/json"}
+    try:
+        with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
+            res = client.get(url, headers=headers)
+    except httpx.HTTPError as exc:
+        logger.warning("reverse_doi_fetch_error title=%r err=%s", clean_title[:60], exc)
+        return None
+    if res.status_code != 200:
+        logger.warning("reverse_doi_http status=%s title=%r", res.status_code, clean_title[:60])
+        return None
+    try:
+        items = res.json().get("message", {}).get("items", [])
+    except ValueError:
+        return None
+    if not isinstance(items, list):
+        return None
+
+    best_doi: str | None = None
+    best_score = 0.0
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        cand_title = _extract_title(item.get("title")) or ""
+        score = jaccard_similarity(clean_title, cand_title)
+        if score > best_score:
+            best_score = score
+            best_doi = (item.get("DOI") or "").strip() or None
+
+    if best_doi and best_score >= REVERSE_MATCH_THRESHOLD:
+        logger.info(
+            "reverse_doi_matched doi=%s score=%.2f title=%r",
+            best_doi, best_score, clean_title[:60],
+        )
+        return best_doi
+    logger.info(
+        "reverse_doi_no_match best=%.2f (< %.2f) title=%r",
+        best_score, REVERSE_MATCH_THRESHOLD, clean_title[:60],
+    )
+    return None
+
+
 def _extract_title(raw: Any) -> str | None:
     if isinstance(raw, list) and raw and isinstance(raw[0], str):
         return raw[0].strip()
