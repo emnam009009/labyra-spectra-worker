@@ -34,6 +34,7 @@ from src.papers.state import (
     set_error,
     update_status,
 )
+from src.papers.tm_seed import seed_tm_from_abstracts
 from src.papers.types import PaperDoc
 
 logger = logging.getLogger(__name__)
@@ -548,6 +549,20 @@ def process_paper(
             raise
         except Exception as exc:
             _log_event("step_pretranslate_failed", paper=paper_id, error=str(exc)[:200])
+
+        # ── STEP 8: seed Translation Memory from bilingual abstracts ─────────
+        # VN papers often carry an English abstract + a Vietnamese "Tóm tắt" —
+        # free parallel data. Store the pair into the lab's TM (Pinecone) so
+        # future EN->VI translations reuse the lab's terminology (RAT). Non-blocking.
+        try:
+            if meta and meta.abstract and meta.abstract_vi:
+                _log_event("step_tm_seed_start", paper=paper_id)
+                seed_tm_from_abstracts(tenant_id, meta.abstract, meta.abstract_vi)
+                _log_event("step_tm_seed_done", paper=paper_id)
+        except CancelledError:
+            raise
+        except Exception as exc:
+            _log_event("step_tm_seed_failed", paper=paper_id, error=str(exc)[:200])
 
         # ── DONE ────────────────────────────────────────────
         total_latency_ms = int((time.monotonic() - started_at) * 1000)

@@ -91,6 +91,9 @@ Rules:
   usually right after the title/authors and before the Introduction. Copy verbatim
   (do NOT rewrite or translate). Empty string if there is no abstract. Do NOT
   include section headings, body text, references, or author affiliations.
+- abstractVi: If the paper ALSO has a Vietnamese abstract (a section titled
+  "Tóm tắt"), copy it verbatim. Empty string if there is none. Separate from
+  `abstract` (the English one) — do not translate either.
 - If any field truly cannot be extracted, use defaults: title="Untitled",
   authors=[], year=0, doi="", documentType="unknown", isbn="", publisher=\"\"."""
 
@@ -125,6 +128,10 @@ class ExtractedMetadata(BaseModel):
     language: str = Field(default="en", description="Primary language, 2-letter ISO 639-1")
     # R224: abstract verbatim — powers paper-detail panel + pre-translate source
     abstract: str = Field(default="", description="Paper abstract verbatim, empty if none")
+    # R226: Vietnamese abstract (Tóm tắt) verbatim — parallel data for TM seeding
+    abstract_vi: str = Field(
+        default="", description="Vietnamese abstract verbatim, empty if none", alias="abstractVi"
+    )
 
 
 def extract_metadata(first_page_text: str) -> ExtractedMetadata:
@@ -173,5 +180,6 @@ def extract_metadata(first_page_text: str) -> ExtractedMetadata:
     parsed.year = _coerce_year(parsed.year, fallback_text=first_page_text)
     parsed.language = (parsed.language or "en").strip().lower()
     parsed.abstract = (parsed.abstract or "").strip()[:_ABSTRACT_CHAR_CAP]
+    parsed.abstract_vi = (parsed.abstract_vi or "").strip()[:_ABSTRACT_CHAR_CAP]
 
     return parsed

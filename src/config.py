@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model_metadata: str = "gemini-3-flash-preview"  # @r179-4-applied
     gemini_model_enrich: str = "gemini-3-flash-preview"
-    gemini_max_tokens_metadata: int = 1536  # R224: room for abstract in JSON
+    gemini_max_tokens_metadata: int = 2048  # R226: room for EN + VI abstract in JSON
     gemini_max_tokens_enrich: int = 200
     # R178-3: domain classification (taxonomy v1, ~$0.001/paper)
     # @r178-3-applied
