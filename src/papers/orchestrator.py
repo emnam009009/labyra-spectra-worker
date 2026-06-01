@@ -26,6 +26,7 @@ from src.papers.index import run_index_step
 from src.papers.google_books import lookup_book_isbn, search_book_by_title
 from src.papers.metadata import extract_metadata
 from src.papers.ocr import run_ocr_step
+from src.papers.pretranslate import run_pretranslate_step
 from src.papers.state import (
     check_cancelled,
     load_paper,
@@ -526,6 +527,25 @@ def process_paper(
             _log_event(
                 "step_citation_failed", paper=paper_id, error=str(exc)[:200],
             )
+
+        # ── STEP 7: Pre-translate Lop 1 (non-blocking) ──────
+        # Translate abstract/conclusion/headings into the tenant default language
+        # so they're instant on open. Enhancement only — never blocks indexing.
+        try:
+            _log_event("step_pretranslate_start", paper=paper_id)
+            run_pretranslate_step(
+                db,
+                tenant_id,
+                paper_id,
+                ocr_result=ocr_result,
+                document_type=meta.document_type if meta else "unknown",
+                source_language=meta.language if meta else "",
+            )
+            _log_event("step_pretranslate_done", paper=paper_id)
+        except CancelledError:
+            raise
+        except Exception as exc:
+            _log_event("step_pretranslate_failed", paper=paper_id, error=str(exc)[:200])
 
         # ── DONE ────────────────────────────────────────────
         total_latency_ms = int((time.monotonic() - started_at) * 1000)

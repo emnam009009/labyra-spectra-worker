@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     # @r178-3-applied
     gemini_model_classify: str = "gemini-3-flash-preview"
     gemini_max_tokens_classify: int = 300
+
+    # R223: Pre-translate Lop 1 (abstract/conclusion/headings) — cheap Flash
+    gemini_model_pretranslate: str = "gemini-3-flash-preview"
+    gemini_max_tokens_pretranslate: int = 2048
     # R177-1a Google Books API for book/textbook metadata resolution
     # (Crossref doesn't index books → fallback path for documentType='book')
     books_api_key: str = ""
