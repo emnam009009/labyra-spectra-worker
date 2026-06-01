@@ -30,6 +30,21 @@ def mistral_ocr_cost_usd(page_count: int) -> float:
 
 
 # ----------------------------------------------------------------------------
+# Datalab Marker — ~$4 / 1000 pages (observed from invoices, no use_llm). @phase R221
+# use_llm mode costs more; update this constant if that's enabled.
+# ----------------------------------------------------------------------------
+DATALAB_OCR_USD_PER_1000_PAGES: float = 4.0
+
+
+def datalab_ocr_cost_usd(page_count: int) -> float:
+    """USD cost for Datalab Marker OCR on `page_count` pages."""
+    if page_count < 0:
+        raise ValueError(f"page_count must be >= 0, got {page_count}")
+    cost = (page_count / 1000.0) * DATALAB_OCR_USD_PER_1000_PAGES
+    return round(cost, 6)
+
+
+# ----------------------------------------------------------------------------
 # Future (B3/B4 will populate):
 #   - voyage_embed_cost_usd(tokens)
 #   - anthropic_enrich_cost_usd(input_tokens, output_tokens, model)

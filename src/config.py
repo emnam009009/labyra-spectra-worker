@@ -39,6 +39,15 @@ class Settings(BaseSettings):
     # R167-B2: Mistral OCR for paper processing pipeline
     mistral_api_key: str = ""
 
+    # R221: OCR engine selection + Datalab hosted Marker (paid cloud, async poll).
+    # ocr_engine "mistral" (default) | "datalab"; ocr_fallback e.g. "mistral".
+    ocr_engine: str = "mistral"
+    ocr_fallback: str = ""
+    datalab_api_key: str = ""
+    datalab_marker_url: str = "https://www.datalab.to/api/v1/marker"
+    datalab_use_llm: bool = False
+    datalab_langs: str = ""
+
     # R167-B3: Voyage AI embedding + Pinecone vector store
     voyage_api_key: str = ""
     pinecone_api_key: str = ""
