@@ -191,6 +191,7 @@ def process_paper(
                 "isbn": meta.isbn,
                 "publisher": meta.publisher,
                 "language": meta.language,
+                "abstract": meta.abstract,
                 "selfDoiSource": self_doi_source,
                 "metadataExtractedAt": SERVER_TIMESTAMP,
             }
@@ -540,6 +541,7 @@ def process_paper(
                 ocr_result=ocr_result,
                 document_type=meta.document_type if meta else "unknown",
                 source_language=meta.language if meta else "",
+                abstract=meta.abstract if meta else "",
             )
             _log_event("step_pretranslate_done", paper=paper_id)
         except CancelledError:

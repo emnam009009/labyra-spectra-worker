@@ -34,7 +34,14 @@ _MAX_PAGES = 50
 _MAX_CHARS = 200_000
 
 _ABSTRACT_NAMES = ("abstract", "summary")
-_CONCLUSION_NAMES = ("conclusion", "conclusions", "concluding remarks")
+_CONCLUSION_NAMES = (
+    "conclusion",
+    "conclusions",
+    "concluding",
+    "conclusions and",
+    "summary and conclusion",
+    "outlook",
+)
 
 # Gemini pricing (gemini-3-flash-preview): $0.50/1M in, $3.00/1M out.
 _GEMINI_IN_USD_PER_M = 0.50
@@ -145,6 +152,7 @@ def run_pretranslate_step(
     ocr_result: OcrResult,
     document_type: str,
     source_language: str,
+    abstract: str = "",
 ) -> None:
     """Pre-translate abstract/conclusion/headings into the tenant default language.
 
@@ -162,7 +170,10 @@ def run_pretranslate_step(
 
     target_name = _LANG_NAME.get(target, "English")
     sections = extract_sections(ocr_result)
-    if not sections.abstract and not sections.conclusion and not sections.headings:
+    # Prefer the metadata-extracted abstract (reliable even when there's no
+    # "Abstract" heading, e.g. review articles); fall back to section extraction.
+    abstract_src = (abstract or "").strip() or sections.abstract
+    if not abstract_src and not sections.conclusion and not sections.headings:
         logger.info("pretranslate_skip_no_sections paper=%s", paper_id)
         return
 
@@ -170,7 +181,7 @@ def run_pretranslate_step(
     in_tok_total = 0
     out_tok_total = 0
 
-    abstract_t, i_ab, o_ab = _translate(sections.abstract, target_name, budget)
+    abstract_t, i_ab, o_ab = _translate(abstract_src, target_name, budget)
     conclusion_t, i_co, o_co = _translate(sections.conclusion, target_name, budget)
     in_tok_total += i_ab + i_co
     out_tok_total += o_ab + o_co

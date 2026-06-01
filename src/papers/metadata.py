@@ -87,8 +87,15 @@ Rules:
   * "unknown" if uncertain — DEFAULT when no strong signal
 - isbn: ISBN-10 or ISBN-13 if visible (book/thesis). Empty for article.
 - publisher: publisher name if visible (book/thesis). Empty for article.
+- abstract: The paper's abstract — the summary paragraph(s) describing the work,
+  usually right after the title/authors and before the Introduction. Copy verbatim
+  (do NOT rewrite or translate). Empty string if there is no abstract. Do NOT
+  include section headings, body text, references, or author affiliations.
 - If any field truly cannot be extracted, use defaults: title="Untitled",
   authors=[], year=0, doi="", documentType="unknown", isbn="", publisher=\"\"."""
+
+
+_ABSTRACT_CHAR_CAP = 3000  # R224: bound stored abstract length
 
 
 class ExtractedMetadata(BaseModel):
@@ -116,6 +123,8 @@ class ExtractedMetadata(BaseModel):
     publisher: str = Field(default="", description="Publisher name (book/thesis only)")
     # R222: primary language (ISO 639-1) for the en->en translation short-circuit
     language: str = Field(default="en", description="Primary language, 2-letter ISO 639-1")
+    # R224: abstract verbatim — powers paper-detail panel + pre-translate source
+    abstract: str = Field(default="", description="Paper abstract verbatim, empty if none")
 
 
 def extract_metadata(first_page_text: str) -> ExtractedMetadata:
@@ -163,5 +172,6 @@ def extract_metadata(first_page_text: str) -> ExtractedMetadata:
     # Re-apply year coercion (Gemini may return string "2024" or 0)
     parsed.year = _coerce_year(parsed.year, fallback_text=first_page_text)
     parsed.language = (parsed.language or "en").strip().lower()
+    parsed.abstract = (parsed.abstract or "").strip()[:_ABSTRACT_CHAR_CAP]
 
     return parsed
