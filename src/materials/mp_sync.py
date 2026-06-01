@@ -63,7 +63,6 @@ _SUMMARY_FIELDS = [
     "nsites",
     "elements",
     "theoretical",
-    "structure",  # R185-7c-1b: needed for Rietveld pattern simulation
 ]
 
 
@@ -111,9 +110,12 @@ def _doc_to_profile(best: Any) -> dict[str, Any]:
             "syncedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         },
     }
-    # R185-7c-1b: include structure in profile when available
-    if structure_dict is not None:
-        result["structure"] = structure_dict
+    # NOTE: crystal structure is intentionally NOT synced from MP — safe_patch
+    # (below) persists only mpId/mpData/electronicPropsMP so MP never overwrites
+    # the manual seed structure. (Removed dead R185-7c-1b block: structure_dict
+    # was never assigned → NameError, and safe_patch stripped it anyway.) If a
+    # future Rietveld feature needs MP structure, serialize it Firestore-safe
+    # (lattice.matrix is a nested array → not allowed) AND add it to safe_patch.
 
     # IMPORTANT: only update crystal structure fields when MP id was looked up
     # via exact match (handled by caller); formula-search fallback should NOT
