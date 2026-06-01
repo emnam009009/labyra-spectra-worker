@@ -189,6 +189,7 @@ def process_paper(
                 "documentType": meta.document_type,
                 "isbn": meta.isbn,
                 "publisher": meta.publisher,
+                "language": meta.language,
                 "selfDoiSource": self_doi_source,
                 "metadataExtractedAt": SERVER_TIMESTAMP,
             }

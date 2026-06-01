@@ -114,6 +114,8 @@ class ExtractedMetadata(BaseModel):
     )
     isbn: str = Field(default="", description="ISBN-10 or ISBN-13 (book/thesis only)")
     publisher: str = Field(default="", description="Publisher name (book/thesis only)")
+    # R222: primary language (ISO 639-1) for the en->en translation short-circuit
+    language: str = Field(default="en", description="Primary language, 2-letter ISO 639-1")
 
 
 def extract_metadata(first_page_text: str) -> ExtractedMetadata:
@@ -160,5 +162,6 @@ def extract_metadata(first_page_text: str) -> ExtractedMetadata:
 
     # Re-apply year coercion (Gemini may return string "2024" or 0)
     parsed.year = _coerce_year(parsed.year, fallback_text=first_page_text)
+    parsed.language = (parsed.language or "en").strip().lower()
 
     return parsed
