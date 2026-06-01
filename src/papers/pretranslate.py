@@ -24,6 +24,7 @@ from google.cloud import firestore  # type: ignore[import-untyped]
 from src.config import get_settings
 from src.papers._gemini_client import extract_text
 from src.papers.chunking import _detect_section, _split_paragraphs
+from src.papers.formula_protect import protect_formulae, restore_formulae
 from src.papers.types import OcrResult
 
 logger = logging.getLogger(__name__)
@@ -127,22 +128,31 @@ def _tenant_default_language(db: firestore.Client, tenant_id: str) -> str:
 
 
 def _translate(text: str, target_name: str, max_tokens: int) -> tuple[str, int, int]:
-    """Translate `text` into `target_name`. Returns (translation, in_tok, out_tok)."""
+    """Translate `text` into `target_name`. Returns (translation, in_tok, out_tok).
+
+    R225: chemical formulae are hard-masked before translation and restored
+    verbatim after, so subscripts can't be split and nomenclature can't drift.
+    """
     if not text.strip():
         return "", 0, 0
+    masked, formulae = protect_formulae(text)
     settings = get_settings()
     system = (
         f"Translate scientific text into {target_name} for an expert reader. "
-        "Keep chemical formulae, units, acronyms, citation markers, and equations "
-        "verbatim (do not transliterate). Output ONLY the translation, no preamble."
+        "Keep units, acronyms, citation markers, and equations verbatim (do not "
+        "transliterate). Placeholders like ⟦F0⟧, ⟦F1⟧ are "
+        "protected terms — keep each one EXACTLY as written, in place; never "
+        "translate, reorder, space out, or drop them. Output ONLY the translation, "
+        "no preamble."
     )
-    return extract_text(
+    out, in_tok, out_tok = extract_text(
         model=settings.gemini_model_pretranslate,
-        prompt=text,
+        prompt=masked,
         system_instruction=system,
         max_tokens=max_tokens,
         temperature=0.2,
     )
+    return restore_formulae(out, formulae), in_tok, out_tok
 
 
 def run_pretranslate_step(
