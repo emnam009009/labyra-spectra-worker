@@ -140,6 +140,36 @@ def _ingest_crossref_refs(
     return result
 
 
+def _normalize_doi_key(doi: str | None) -> str:
+    """Case-insensitive, trimmed DOI key for self-comparison (DOIs are
+    case-insensitive; trailing punctuation from OCR is stripped)."""
+    return (doi or "").strip().rstrip(".,;)]").lower()
+
+
+def _drop_self_citation(refs: list, self_doi: str | None, paper_id: str) -> list:
+    """Remove any "reference" that is the paper citing ITSELF.
+
+    The self-DOI is printed in the running header/footer of every page, so the
+    DOI-anchored PDF extraction (Source B) and the agent (Source C) can pick it
+    up and resolve it to the paper's OWN title — a bogus reference #1. Crossref's
+    reference[] (Source A) never lists the paper itself, so this guard only
+    matters for the PDF fallbacks. No-op when the self-DOI is unknown.
+    """
+    if not self_doi:
+        return refs
+    self_key = _normalize_doi_key(self_doi)
+    if not self_key:
+        return refs
+    kept = [r for r in refs if not (r.doi and _normalize_doi_key(r.doi) == self_key)]
+    if len(kept) < len(refs):
+        logger.info(
+            "citation_self_ref_dropped paper=%s removed=%d",
+            paper_id,
+            len(refs) - len(kept),
+        )
+    return kept
+
+
 def run_citation_step(
     db: firestore.Client,
     tenant_id: str,
@@ -193,6 +223,10 @@ def run_citation_step(
     # ── Source B (fallback): PDF DOI-anchored extraction ─────────────────
     # 1. Extract the full reference list (numbered; DOI optional) — R237bn/bo.
     refs = extract_references(full_text, max_results=MAX_DOIS_PER_PAPER)
+    # R240: drop a self-citation (footer/header self-DOI leak) BEFORE deciding
+    # whether to fall back to the agent — a paper whose ONLY DOI-anchored
+    # "reference" was itself then still gets its real references via Source C.
+    refs = _drop_self_citation(refs, self_doi, paper_id)
     result.references_found = len(refs)
     result.references_with_doi = sum(1 for r in refs if r.doi)
     result.dois_found = result.references_with_doi  # backward-compat field
@@ -206,6 +240,7 @@ def run_citation_step(
         # empty — let the agent structure the references section. DOIs returned
         # are verified verbatim inside references_agent (no fabrication).
         agent_refs, _in_tok, _out_tok = extract_references_with_agent(full_text)
+        agent_refs = _drop_self_citation(agent_refs, self_doi, paper_id)  # R240
         if agent_refs:
             logger.info(
                 "citation_source_agent tenant=%s paper=%s refs=%d",
