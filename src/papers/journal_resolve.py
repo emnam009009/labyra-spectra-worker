@@ -19,6 +19,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.papers.crossref import extract_supplement_url
+from src.papers.text_normalize import clean_text
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +130,7 @@ def resolve_journal_from_doi(doi: str) -> JournalResolveResult:
             result.journal = journal
             oa_title = oa_data.get("title") or oa_data.get("display_name")
             if isinstance(oa_title, str):
-                result.title = oa_title.strip()
+                result.title = clean_text(oa_title)
             result.authors = _extract_authors_openalex(oa_data)
             result.journal_short = journal_short
             result.journal_issn = issn
@@ -165,7 +166,7 @@ def _fetch_crossref(doi: str) -> Optional[dict]:
 def _extract_journal(msg: dict) -> str:
     cont = msg.get("container-title")
     if isinstance(cont, list) and cont and isinstance(cont[0], str):
-        return cont[0].strip()
+        return clean_text(cont[0])
     return ""
 
 
@@ -175,9 +176,9 @@ def _extract_title(msg: dict) -> str:
     if isinstance(raw, list):
         for t in raw:
             if isinstance(t, str) and t.strip():
-                return t.strip()
+                return clean_text(t)
     elif isinstance(raw, str) and raw.strip():
-        return raw.strip()
+        return clean_text(raw)
     return ""
 
 
@@ -194,9 +195,9 @@ def _extract_authors(msg: dict) -> list[str]:
         given = a.get("given")
         if isinstance(family, str) and family.strip():
             if isinstance(given, str) and given.strip():
-                out.append(f"{family.strip()}, {given.strip()}")
+                out.append(clean_text(f"{family}, {given}"))
             else:
-                out.append(family.strip())
+                out.append(clean_text(family))
     return out
 
 
@@ -213,7 +214,7 @@ def _extract_authors_openalex(data: dict) -> list[str]:
         if isinstance(author, dict):
             name = author.get("display_name")
             if isinstance(name, str) and name.strip():
-                out.append(name.strip())
+                out.append(clean_text(name))
     return out
 
 

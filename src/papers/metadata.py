@@ -30,6 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.config import get_settings
 from src.papers._gemini_client import extract_json
+from src.papers.text_normalize import clean_text, clean_text_list
 
 logger = logging.getLogger(__name__)
 
@@ -181,5 +182,13 @@ def extract_metadata(first_page_text: str) -> ExtractedMetadata:
     parsed.language = (parsed.language or "en").strip().lower()
     parsed.abstract = (parsed.abstract or "").strip()[:_ABSTRACT_CHAR_CAP]
     parsed.abstract_vi = (parsed.abstract_vi or "").strip()[:_ABSTRACT_CHAR_CAP]
+
+    # R239: strip Unicode junk (U+2010 hyphen, zero-width, NBSP, JATS tags,
+    # entities) from the bibliographic identity fields so the STORED title /
+    # authors are clean — Wiley & co. print U+2010 in titles, which the LLM
+    # faithfully copies and which then renders as a broken-looking hyphen.
+    parsed.title = clean_text(parsed.title) or "Untitled"
+    parsed.authors = clean_text_list(parsed.authors)
+    parsed.publisher = clean_text(parsed.publisher)
 
     return parsed

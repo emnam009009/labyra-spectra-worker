@@ -42,6 +42,7 @@ from src.papers.openalex import fetch_openalex_oa_batch, lookup_doi
 from src.papers.references_agent import extract_references_with_agent
 from src.papers.references_extractor import extract_references
 from src.papers.state import check_cancelled
+from src.papers.text_normalize import clean_text
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,7 @@ def _ingest_crossref_refs(
                 created_by=created_by_final,
                 source_paper_id=paper_id,
                 target_doi=ref.doi,
-                target_title=ref.title,
+                target_title=clean_text(ref.title) or None,
                 target_authors=ref.authors,
                 target_year=ref.year,
                 target_journal=ref.journal,
@@ -283,7 +284,7 @@ def run_citation_step(
                 created_by=created_by_final,
                 source_paper_id=paper_id,
                 target_doi=ref.doi,
-                target_title=metadata.title if metadata else None,
+                target_title=(clean_text(metadata.title) or None) if metadata else None,
                 target_authors=metadata.authors if metadata else None,
                 target_year=metadata.year if metadata else None,
                 target_journal=metadata.journal if metadata else None,
