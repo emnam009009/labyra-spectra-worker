@@ -105,6 +105,33 @@ def extract_self_doi(pages_text: list[str]) -> SelfDoiResult:
     return SelfDoiResult()
 
 
+def choose_self_doi(gemini_doi: str, pages_text: list[str]) -> tuple[str, str]:
+    """Pick the authoritative self-DOI for a paper.
+
+    The deterministic labelled DOI printed on the opening pages (a "doi.org/10..."
+    URL or a "DOI: 10..." line) is GROUND TRUTH. The metadata LLM can silently
+    truncate it (e.g. "10.1002/advs.202105135" -> "10.1002/adv.202105135"), which
+    then fails to resolve and leaves doiVerified=False (the amber-triangle bug).
+
+    extract_self_doi() already cuts at the references section and format-validates,
+    so it returns the paper's OWN DOI safely — never a reference's. We therefore
+    PREFER it whenever found, and only fall back to the LLM value when no labelled
+    DOI is present (e.g. noisy OCR where the URL didn't survive). A title-based
+    reverse lookup remains the caller's final fallback when neither yields a DOI.
+
+    Returns (doi, source). source ∈ {"page-text", "gemini", ""}.
+
+    @phase R238-doi-deterministic-first
+    """
+    recovered = extract_self_doi(pages_text)
+    if recovered.found:
+        return recovered.doi, recovered.source  # "page-text"
+    gemini = (gemini_doi or "").strip()
+    if gemini:
+        return gemini, "gemini"
+    return "", ""
+
+
 _NAME_PARTICLES = {
     "van", "von", "der", "den", "del", "dela", "los", "las", "san", "bin", "ibn",
 }

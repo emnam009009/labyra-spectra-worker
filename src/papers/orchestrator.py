@@ -141,19 +141,25 @@ def process_paper(
             # R237bm (gap B): if Gemini found no DOI, scan pages 1-3 for a
             # LABELLED self-DOI before giving up. Deterministic, best-effort —
             # the DOI is printed on the opening pages of most articles.
-            self_doi_source = "gemini" if (meta.doi or "").strip() else ""
-            if not (meta.doi or "").strip():
-                from src.papers.self_doi_resolver import extract_self_doi
+            # R238: the deterministic labelled DOI on the opening pages is ground
+            # truth — the metadata LLM can truncate it (e.g. "advs"->"adv"), which
+            # then fails to resolve and leaves doiVerified=False (amber triangle).
+            # Prefer the regex DOI whenever found; fall back to the LLM value, then
+            # the title reverse-lookup below.
+            from src.papers.self_doi_resolver import choose_self_doi
 
-                pages_text = [p.text for p in ocr_result.pages[:3]]
-                recovered = extract_self_doi(pages_text)
-                if recovered.found:
-                    meta.doi = recovered.doi
-                    self_doi_source = recovered.source
-                    logger.info(
-                        "self_doi_recovered tenant=%s paper=%s doi=%r source=%s",
-                        tenant_id, paper_id, recovered.doi, recovered.source,
-                    )
+            pages_text = [p.text for p in ocr_result.pages[:3]]
+            gemini_doi = (meta.doi or "").strip()
+            meta.doi, self_doi_source = choose_self_doi(gemini_doi, pages_text)
+            if (
+                self_doi_source == "page-text"
+                and gemini_doi
+                and meta.doi.lower() != gemini_doi.lower()
+            ):
+                logger.info(
+                    "self_doi_override tenant=%s paper=%s gemini=%r regex=%r",
+                    tenant_id, paper_id, gemini_doi, meta.doi,
+                )
             # R237cg: still no DOI + we have a title → reverse-lookup at Crossref
             # by bibliographic metadata. Strict title match (Jaccard ≥ 0.7) so a
             # wrong DOI is never attached. The recovered DOI gets verified +
