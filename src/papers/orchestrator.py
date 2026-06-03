@@ -161,7 +161,9 @@ def process_paper(
             gemini_doi = (meta.doi or "").strip()
             candidate_doi, _candidate_source = choose_self_doi(gemini_doi, pages_text)
 
-            verified = verify_self_doi(candidate_doi, meta.title, meta.authors, meta.year)
+            verified = verify_self_doi(
+                candidate_doi, meta.title, meta.authors, meta.year, meta.document_type
+            )
             meta.doi = verified.doi
             self_doi_source = verified.source
             doi_trusted = verified.trusted

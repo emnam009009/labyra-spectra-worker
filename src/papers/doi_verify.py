@@ -53,6 +53,13 @@ VERIFY_TITLE_THRESHOLD = 0.6
 # Below this, a title is too short to disambiguate a DOI reliably.
 _MIN_TITLE_LEN = 10
 
+# R244: document types we do NOT resolve via Crossref. Books and theses aren't
+# indexed as journal articles — they're identified by ISBN through the Google
+# Books path (see orchestrator's documentType=='book' branch). Running a
+# title-based reverse-lookup on them risks attaching a wrong edition's/printing's
+# DOI, so the article DOI pipeline skips them entirely.
+_NON_ARTICLE_TYPES = frozenset({"book", "thesis"})
+
 
 class DoiVerifyResult(BaseModel):
     """Outcome of self-DOI verification.
@@ -62,6 +69,7 @@ class DoiVerifyResult(BaseModel):
       - "reverse-lookup"  recovered by Crossref bibliographic search on the title
       - "unverified"      a candidate exists but could not be confirmed
       - "empty"           no candidate and nothing recovered
+      - "nonarticle"      book/thesis — DOI not resolved here (ISBN path owns it)
     """
 
     doi: str = ""
@@ -80,19 +88,31 @@ def verify_self_doi(
     title: str | None,
     authors: list[str] | None = None,
     year: int | None = None,
+    document_type: str | None = None,
 ) -> DoiVerifyResult:
     """Verify an extracted self-DOI, reverse-looking-up by title if it fails.
 
     Never guesses: returns an unverified/empty result rather than attaching a
-    DOI whose resolved title does not match. See module docstring.
+    DOI whose resolved title does not match. Books/theses are skipped (they are
+    identified by ISBN via Google Books, not by a Crossref article DOI). See
+    module docstring.
     """
+    cand = (candidate_doi or "").strip()
+
+    # R244: don't resolve non-article documents via Crossref — ISBN path owns them.
+    if (document_type or "").strip().lower() in _NON_ARTICLE_TYPES:
+        logger.info(
+            "doi_verify_skipped_nonarticle type=%s doi=%s",
+            document_type, cand or None,
+        )
+        return DoiVerifyResult(doi=cand, source="nonarticle")
+
     # Imported lazily to mirror the orchestrator's call-site pattern and avoid a
     # heavier import graph at module load.
     from src.papers.crossref import reverse_lookup_doi
     from src.papers.google_books import jaccard_similarity
     from src.papers.journal_resolve import resolve_journal_from_doi
 
-    cand = (candidate_doi or "").strip()
     ttl = (title or "").strip()
 
     # 1. Verify the extracted candidate actually points to THIS paper.
