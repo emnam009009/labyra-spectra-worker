@@ -41,10 +41,7 @@ from pydantic import BaseModel
 
 # Reuse existing helpers (same package) — keep one source of truth.
 from src.papers.google_books import jaccard_similarity
-from src.papers.references_parser import (
-    _DOI_VALIDATE_RE,
-    _find_references_section_start,
-)
+from src.papers.references_parser import _DOI_VALIDATE_RE
 
 # Guard A: minimum token-set Jaccard to accept that a resolved title is the
 # SAME paper as the OCR title. Low on purpose — this guard only rejects a DOI
@@ -91,18 +88,35 @@ def extract_self_doi(pages_text: list[str]) -> SelfDoiResult:
         return SelfDoiResult()
 
     head = "\n".join(pages_text[:SELF_DOI_PAGE_WINDOW])
-    # Cut at a references/bibliography header so we never pick a reference's DOI.
-    ref_start = _find_references_section_start(head)
-    scan = head[:ref_start] if ref_start >= 0 else head
 
-    match = _LABELLED_DOI_RE.search(scan)
-    if not match:
+    # The self-DOI is printed in the running header/footer of EVERY page, so among
+    # the labelled DOIs on the opening pages it is by far the MOST FREQUENT; a
+    # cited reference's DOI appears once. Return the most frequent (ties broken by
+    # earliest appearance).
+    #
+    # We deliberately do NOT cut at a "References" header here anymore: long
+    # reviews (notably Chemical Reviews) print a table of contents on page 1 that
+    # lists "References ... <page>", and the old cut treated that TOC entry as the
+    # references section — truncating the scan before the footer DOI and leaving
+    # the LLM's misread DOI in place (the 0c01153-vs-0c00831 amber-triangle bug
+    # that "stuck" on Chem. Rev. papers). Frequency makes a stray reference DOI
+    # lose to the repeated footer DOI without needing the cut.
+    counts: dict[str, int] = {}
+    first_seen: dict[str, tuple[int, str]] = {}
+    for idx, m in enumerate(_LABELLED_DOI_RE.finditer(head)):
+        doi = _normalize_doi(m.group(1) or m.group(2) or "")
+        if not doi or not _DOI_VALIDATE_RE.match(doi):
+            continue
+        key = doi.lower()
+        counts[key] = counts.get(key, 0) + 1
+        if key not in first_seen:
+            first_seen[key] = (idx, doi)
+
+    if not counts:
         return SelfDoiResult()
 
-    doi = _normalize_doi(match.group(1) or match.group(2) or "")
-    if doi and _DOI_VALIDATE_RE.match(doi):
-        return SelfDoiResult(found=True, doi=doi, source="page-text")
-    return SelfDoiResult()
+    best = min(counts, key=lambda k: (-counts[k], first_seen[k][0]))
+    return SelfDoiResult(found=True, doi=first_seen[best][1], source="page-text")
 
 
 def choose_self_doi(gemini_doi: str, pages_text: list[str]) -> tuple[str, str]:
