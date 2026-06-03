@@ -126,6 +126,11 @@ def process_paper(
         # ── STEP 1b: Metadata extract (best-effort, non-blocking) ──
         # Mirrors TS hotfix-5d-4 — extract real title/year/DOI from page 1
         # R177-1d: also detects documentType + isbn + publisher (for books)
+        # R242: set True in step 1b only when the self-DOI is title-verified;
+        # gates doiVerified below so a wrong-but-resolvable DOI shows as amber.
+        # Defaults True so a step-1b failure preserves the prior doi_found-only
+        # behaviour rather than silently downgrading every paper.
+        doi_trusted = True
         first_page_text = ocr_result.pages[0].text if ocr_result.pages else ""
         try:
             # @r179-8-applied: log input + output for debug
@@ -138,43 +143,37 @@ def process_paper(
                 "step1b_output tenant=%s paper=%s title=%r authors=%d year=%s doi=%r",
                 tenant_id, paper_id, meta.title, len(meta.authors), meta.year, meta.doi,
             )
-            # R237bm (gap B): if Gemini found no DOI, scan pages 1-3 for a
-            # LABELLED self-DOI before giving up. Deterministic, best-effort —
-            # the DOI is printed on the opening pages of most articles.
-            # R238: the deterministic labelled DOI on the opening pages is ground
-            # truth — the metadata LLM can truncate it (e.g. "advs"->"adv"), which
-            # then fails to resolve and leaves doiVerified=False (amber triangle).
-            # Prefer the regex DOI whenever found; fall back to the LLM value, then
-            # the title reverse-lookup below.
+            # R238/R242: resolve the paper's own DOI in two stages.
+            #   (1) choose_self_doi picks the best CANDIDATE — the deterministic
+            #       labelled DOI repeated on the opening pages (footer), else the
+            #       metadata LLM value (which can truncate/misread it).
+            #   (2) verify_self_doi treats that candidate as unverified: it
+            #       resolves the DOI and checks the publisher's canonical title
+            #       really matches THIS paper. If the candidate is wrong (resolves
+            #       to a different paper) or missing, it reverse-looks-up the DOI
+            #       by title at Crossref. A wrong DOI poisons topic + references,
+            #       so only a title-matched DOI is trusted; otherwise doiVerified
+            #       stays False (amber) rather than attaching a confident wrong one.
+            from src.papers.doi_verify import verify_self_doi
             from src.papers.self_doi_resolver import choose_self_doi
 
             pages_text = [p.text for p in ocr_result.pages[:3]]
             gemini_doi = (meta.doi or "").strip()
-            meta.doi, self_doi_source = choose_self_doi(gemini_doi, pages_text)
+            candidate_doi, _candidate_source = choose_self_doi(gemini_doi, pages_text)
+
+            verified = verify_self_doi(candidate_doi, meta.title, meta.authors, meta.year)
+            meta.doi = verified.doi
+            self_doi_source = verified.source
+            doi_trusted = verified.trusted
             if (
-                self_doi_source == "page-text"
-                and gemini_doi
-                and meta.doi.lower() != gemini_doi.lower()
+                verified.doi
+                and candidate_doi
+                and verified.doi.lower() != candidate_doi.lower()
             ):
                 logger.info(
-                    "self_doi_override tenant=%s paper=%s gemini=%r regex=%r",
-                    tenant_id, paper_id, gemini_doi, meta.doi,
+                    "self_doi_corrected tenant=%s paper=%s candidate=%r final=%r via=%s",
+                    tenant_id, paper_id, candidate_doi, verified.doi, verified.source,
                 )
-            # R237cg: still no DOI + we have a title → reverse-lookup at Crossref
-            # by bibliographic metadata. Strict title match (Jaccard ≥ 0.7) so a
-            # wrong DOI is never attached. The recovered DOI gets verified +
-            # enriched downstream like any other.
-            if not (meta.doi or "").strip() and (meta.title or "").strip():
-                from src.papers.crossref import reverse_lookup_doi
-
-                rev_doi = reverse_lookup_doi(meta.title, meta.authors, meta.year)
-                if rev_doi:
-                    meta.doi = rev_doi
-                    self_doi_source = "crossref-title"
-                    logger.info(
-                        "self_doi_reverse_lookup tenant=%s paper=%s doi=%r",
-                        tenant_id, paper_id, rev_doi,
-                    )
             # Persist input length + output snapshot to Firestore for offline debug
             try:
                 db.document(f"tenants/{tenant_id}/papers/{paper_id}").update({
@@ -392,9 +391,11 @@ def process_paper(
                     "journalIssn": journal_result.journal_issn,
                     "journalSourceId": journal_result.source_id,
                     "journalResolvedAt": journal_result.resolved_at,
-                    # R237cc: DOI verification — False means the DOI didn't
-                    # resolve at Crossref or OpenAlex (likely an OCR error).
-                    "doiVerified": journal_result.doi_found,
+                    # R237cc/R242: doiVerified is True only when the DOI both
+                    # resolves AND was title-verified to be THIS paper (see
+                    # doi_verify). False -> the DOI didn't resolve, or resolved
+                    # to a different record (likely an OCR/footer error) -> amber.
+                    "doiVerified": journal_result.doi_found and doi_trusted,
                 }
                 # R237bw: only set siUrl when Crossref actually has an SI relation,
                 # so a reprocess never clobbers a user-entered link with "".
