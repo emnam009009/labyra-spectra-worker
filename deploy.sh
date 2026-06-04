@@ -45,7 +45,7 @@ gcloud run deploy "$SERVICE" \
   --memory 4Gi \
   --cpu 2 \
   --timeout 3600 \
-  --max-instances 10 \
+  --max-instances 2 \
   --min-instances 0 \
   --concurrency 1 \
   --set-env-vars "GCP_PROJECT_ID=${PROJECT_ID},GCP_REGION=${REGION},FIREBASE_BUCKET=${FIREBASE_BUCKET},DEFAULT_LOCALE=en,ANALYSIS_VERSION=xrd-1.0.0,PINECONE_INDEX_NAME=labyra-papers,OCR_ENGINE=datalab,OCR_FALLBACK=mistral,ENABLE_ENRICHMENT=true" \

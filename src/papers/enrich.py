@@ -58,7 +58,10 @@ def _anthropic_client() -> Anthropic:
     settings = get_settings()
     if not settings.anthropic_api_key:
         raise FatalError("ANTHROPIC_API_KEY missing in worker settings")
-    return Anthropic(api_key=settings.anthropic_api_key)
+    # max_retries bumped (default 2) so transient 429 rate-limit hits are retried
+    # with backoff instead of falling back to un-enriched raw text. Combined with
+    # the lowered Cloud Run max-instances, 429s should be rare.
+    return Anthropic(api_key=settings.anthropic_api_key, max_retries=5)
 
 
 def _enrich_one_chunk(
