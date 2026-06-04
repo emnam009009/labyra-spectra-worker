@@ -48,7 +48,7 @@ gcloud run deploy "$SERVICE" \
   --max-instances 10 \
   --min-instances 0 \
   --concurrency 1 \
-  --set-env-vars "GCP_PROJECT_ID=${PROJECT_ID},GCP_REGION=${REGION},FIREBASE_BUCKET=${FIREBASE_BUCKET},DEFAULT_LOCALE=en,ANALYSIS_VERSION=xrd-1.0.0,PINECONE_INDEX_NAME=labyra-papers,OCR_ENGINE=datalab,OCR_FALLBACK=mistral" \
+  --set-env-vars "GCP_PROJECT_ID=${PROJECT_ID},GCP_REGION=${REGION},FIREBASE_BUCKET=${FIREBASE_BUCKET},DEFAULT_LOCALE=en,ANALYSIS_VERSION=xrd-1.0.0,PINECONE_INDEX_NAME=labyra-papers,OCR_ENGINE=datalab,OCR_FALLBACK=mistral,ENABLE_ENRICHMENT=true" \
   --set-secrets "ANTHROPIC_API_KEY=anthropic-api-key:latest,MP_API_KEY=mp-api-key:latest,MISTRAL_API_KEY=mistral-api-key:latest,VOYAGE_API_KEY=voyage-api-key:latest,PINECONE_API_KEY=pinecone-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,BOOKS_API_KEY=books-api-key:latest,OPENALEX_API_KEY=openalex-api-key:latest,DATALAB_API_KEY=datalab-api-key:latest" \
   --quiet
 
