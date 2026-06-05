@@ -14,6 +14,7 @@ dependencies = [
 
     # GCP
     "google-cloud-firestore>=2.19.0",
+    "google-cloud-batch>=0.17.0",
     "google-cloud-storage>=2.18.0",
     "google-cloud-pubsub>=2.27.0",
     "google-cloud-secret-manager>=2.21.0",
