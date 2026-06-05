@@ -1,0 +1,81 @@
+"""TestClient tests for the DFT router, isolated from main.py / heavy worker deps.
+
+@phase R272w-c (DFT P0 — endpoints)
+"""
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from pymatgen.core import Lattice, Structure
+
+from src.dft.routes import router
+
+app = FastAPI()
+app.include_router(router)
+client = TestClient(app)
+
+
+def _rutile_cif():
+    return Structure.from_spacegroup(
+        136, Lattice.tetragonal(4.594, 2.959), ["Ti", "O"], [[0, 0, 0], [0.305, 0.305, 0]]
+    ).to(fmt="cif")
+
+
+def test_structure_from_cif():
+    r = client.post("/dft/structure", json={
+        "source": "cif", "cif_text": _rutile_cif(), "pseudo_map": {"Ti": "Ti.UPF", "O": "O.UPF"},
+    })
+    assert r.status_code == 200
+    s = r.json()
+    assert s["ibrav"] == 6 and s["ntyp"] == 2 and s["nat"] == 6
+    assert all(d["pseudoFile"] for d in s["atomicSpecies"])
+
+
+def test_structure_bad_cif_400():
+    assert client.post("/dft/structure", json={"source": "cif", "cif_text": "nope"}).status_code == 400
+
+
+def test_structure_missing_field_400():
+    assert client.post("/dft/structure", json={"source": "cif"}).status_code == 400
+
+
+def test_kpath():
+    r = client.post("/dft/kpath", json={"source": "cif", "cif_text": _rutile_cif()})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["path"] and body["path"][-1]["npoints"] == 1
+
+
+def test_generate_full_dag():
+    cif = _rutile_cif()
+    s = client.post("/dft/structure", json={
+        "source": "cif", "cif_text": cif, "pseudo_map": {"Ti": "Ti.UPF", "O": "O.UPF"},
+    }).json()
+    path = client.post("/dft/kpath", json={"source": "cif", "cif_text": cif}).json()["path"]
+    r = client.post("/dft/generate", json={
+        "structure": s, "prefix": "TiO2", "functional": "pbe", "ecutwfc": 50, "ecutrho": 400,
+        "hubbard": [{"manifold": "Ti-3d", "value": 3.0}],
+        "units": [
+            {"id": "u1", "calcType": "scf", "params": {
+                "tstress": False, "tprnfor": True, "occupations": "fixed", "convThr": 1e-9,
+                "kPoints": {"type": "automatic", "grid": [6, 6, 8], "shift": [0, 0, 0]}}},
+            {"id": "u2", "calcType": "bands", "params": {
+                "occupations": "fixed", "convThr": 1e-10,
+                "kPoints": {"type": "crystal_b", "path": path}}},
+            {"id": "u3", "calcType": "dos", "params": {}},
+            {"id": "u4", "calcType": "charge", "name": "rho", "params": {"plotNum": 0}},
+        ],
+    })
+    assert r.status_code == 200
+    units = {u["id"]: u for u in r.json()["units"]}
+    assert units["u1"]["executable"] == "pw.x"
+    assert "ibrav       = 6" in units["u1"]["input"] and "HUBBARD" in units["u1"]["input"]
+    assert units["u2"]["executable"] == "pw.x" and "K_POINTS {crystal_b}" in units["u2"]["input"]
+    assert units["u3"]["executable"] == "dos.x" and "&DOS" in units["u3"]["input"]
+    assert units["u4"]["executable"] == "pp.x" and "&INPUTPP" in units["u4"]["input"]
+
+
+def test_generate_pw_without_structure_400():
+    r = client.post("/dft/generate", json={
+        "prefix": "x", "ecutwfc": 1, "ecutrho": 1,
+        "units": [{"id": "z", "calcType": "scf", "params": {}}],
+    })
+    assert r.status_code == 400

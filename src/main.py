@@ -627,3 +627,9 @@ async def csie_process(request: Request) -> dict:
     result = run_csie_for_sample(tenant_id, sample_id, force=False)
     return result.to_dict()
 
+
+
+# ── R272w-c: DFT input-generator endpoints (Phase 0) ──
+from src.dft.routes import router as dft_router  # noqa: E402
+
+app.include_router(dft_router)
