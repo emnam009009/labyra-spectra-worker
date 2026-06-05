@@ -1,0 +1,4 @@
+# Real QE .out files are huge — keep them local, never commit.
+# Only the small synthetic fixtures (and expected.json) are tracked.
+*.out
+!synthetic_*.out

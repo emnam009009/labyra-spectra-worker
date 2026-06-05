@@ -1,0 +1,21 @@
+     Program PWSCF v.7.4.1 starts
+     lattice parameter (alat)  =       8.6814  a.u.
+     number of electrons       =        64.00
+     number of Kohn-Sham states=           40
+
+     Self-consistent Calculation
+     iteration #  1     ecut= ...
+     estimated scf accuracy    <       1.2E-02 Ry
+     iteration #  2
+     estimated scf accuracy    <       3.4E-06 Ry
+     iteration #  3
+     estimated scf accuracy    <       8.7E-10 Ry
+
+     End of self-consistent calculation
+     highest occupied, lowest unoccupied level (ev):     2.5000    5.2200
+
+!    total energy              =    -500.12345678 Ry
+
+     convergence has been achieved in  42 iterations
+
+     JOB DONE.

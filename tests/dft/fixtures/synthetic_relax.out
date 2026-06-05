@@ -1,0 +1,29 @@
+     Program PWSCF v.7.4.1 starts
+
+     Self-consistent Calculation (ionic step 1)
+     estimated scf accuracy    <       5.0E-09 Ry
+!    total energy              =    -499.90000000 Ry
+     Total force =     0.045000     Total SCF correction =     0.000100
+
+     Self-consistent Calculation (ionic step 2)
+     estimated scf accuracy    <       2.0E-10 Ry
+!    total energy              =    -500.10000000 Ry
+     Total force =     0.000300     Total SCF correction =     0.000010
+
+     bfgs converged in   2 scf cycles and    1 bfgs steps
+
+Begin final coordinates
+     new unit-cell volume =       1203.5 a.u.^3 (     178.60 Ang^3 )
+
+CELL_PARAMETERS (alat=  8.6814)
+   1.000000000   0.000000000   0.000000000
+   0.000000000   1.000000000   0.000000000
+   0.000000000   0.000000000   0.644101000
+
+ATOMIC_POSITIONS (crystal)
+Ti       0.000000000   0.000000000   0.000000000
+Ti       0.500000000   0.500000000   0.500000000
+O        0.305000000   0.305000000   0.000000000
+End final coordinates
+
+     JOB DONE.
