@@ -1,0 +1,93 @@
+! ════════════════════════════════════════════════════════════════════
+!  h-WO₃ bulk · vc-relax · PBE+U (Dudarev, ortho-atomic)
+!  Quantum ESPRESSO 7.4.1 · bố cục chuẩn hóa kiểu Labyra-generator
+!  Thứ tự: CONTROL → SYSTEM → ELECTRONS → IONS → CELL
+!          ATOMIC_SPECIES → ATOMIC_POSITIONS → K_POINTS → HUBBARD
+! ════════════════════════════════════════════════════════════════════
+
+&CONTROL
+    calculation    = 'vc-relax'
+    prefix         = 'h-WO3_bulk'
+    pseudo_dir     = './pseudo'
+    outdir         = './outdir_bulk_vc-relax'
+    wfcdir         = './outdir_bulk_vc-relax'
+    wf_collect     = .false.                ! thông thường mọi workflow không bật
+    restart_mode   = 'from_scratch'
+    verbosity      = 'high'
+    tstress        = .true.
+    tprnfor        = .true.
+    etot_conv_thr  = 1.0d-6                 ! ~ 2.7d-5 eV
+    forc_conv_thr  = 4.5d-4                 ! max & RMS force (0.00045 / 0.0003 a.u.)
+/
+
+&SYSTEM
+    ! ── ô mạng (ibrav = 4 hexagonal; ibrav = 0 thì cần CELL_PARAMETERS) ──
+    ibrav          = 4
+    celldm(1)      = 13.9890                ! a = 7.4029 Å
+    celldm(3)      = 0.5142                 ! c/a
+    nat            = 12                     ! số nguyên tử trong ô đơn
+    ntyp           = 2
+    ! ── cutoff (chỉnh theo giả thế; PAW: ecutrho = 12 × ecutwfc) ────────
+    ecutwfc        = 60.0
+    ecutrho        = 720.0
+    ! ── XC functional ──────────────────────────────────────────────────
+    input_dft      = 'pbe'                  ! theo bài báo (Perdew–Burke–Ernzerhof)
+    ! ── spin / đối xứng (nspin=2 khi làm hệ khuyết tật sau này) ──────────
+    nspin          = 1
+    noncolin       = .false.
+    lspinorb       = .false.
+    nosym          = .false.
+    ! ── occupations (smearing cho bước relax) ───────────────────────────
+    occupations    = 'smearing'
+    smearing       = 'gaussian'
+    degauss        = 0.007
+/
+
+&ELECTRONS
+    conv_thr         = 1.0d-8
+    mixing_beta      = 0.2
+    mixing_ndim      = 20
+    mixing_mode      = 'plain'
+    diagonalization  = 'david'
+    diago_david_ndim = 4
+    diago_full_acc   = .false.
+    startingpot      = 'atomic'
+    startingwfc      = 'atomic+random'
+/
+
+&IONS
+    ion_dynamics     = 'bfgs'               ! thuật toán tối ưu cấu trúc
+    upscale          = 100
+    trust_radius_max = 0.8
+/
+
+&CELL
+    cell_dynamics    = 'bfgs'
+    cell_dofree      = 'all'                ! bulk: 'all' · slab: '2Dxy'
+    press_conv_thr   = 0.5
+/
+
+ATOMIC_SPECIES
+    W   183.84   W.pbe-spn-kjpaw_psl.1.0.0.UPF
+    O    15.99   O.pbe-n-kjpaw_psl.1.0.0.UPF
+
+ATOMIC_POSITIONS {crystal}
+    W    0.000000000   0.500000000   0.000000000
+    W    0.500000000   0.500000000   0.000000000
+    W    0.500000000   0.000000000   0.000000000
+    O    0.214227760   0.428455520   0.000000000
+    O    0.785772240   0.571544480   0.000000000
+    O    0.571544480   0.785772240   0.000000000
+    O    0.428455520   0.214227760   0.000000000
+    O    0.214227760   0.785772240   0.000000000
+    O    0.785772240   0.214227760   0.000000000
+    O    0.000000000   0.500000000   0.500000000
+    O    0.500000000   0.500000000   0.500000000
+    O    0.500000000   0.000000000   0.500000000
+
+K_POINTS {automatic}
+    3 3 6   0 0 0                           ! Monkhorst–Pack (shrinking factor = 6 theo c trục ngắn)
+
+HUBBARD {ortho-atomic}
+    U   W-5d   6.2
+    U   O-2p   9.0
