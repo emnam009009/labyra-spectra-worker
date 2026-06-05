@@ -1,0 +1,98 @@
+&CONTROL
+    calculation    = '{{ p.calculation }}',
+    prefix         = '{{ wf.prefix }}',
+    pseudo_dir     = './pseudo',
+    outdir         = '{{ unit.outdir }}',
+{%- if p.calculation == 'vc-relax' %}
+    wfcdir         = '{{ unit.outdir }}',
+    wf_collect     = .false.,
+{%- endif %}
+    restart_mode   = 'from_scratch',
+    verbosity      = 'high',
+    tstress        = {{ p.tstress | qe_bool }},
+    tprnfor        = {{ p.tprnfor | qe_bool }},
+{%- if p.calculation == 'vc-relax' %}
+    etot_conv_thr  = 1.0d-6,
+    forc_conv_thr  = 4.5d-4,
+{%- endif %}
+/
+&SYSTEM
+    ibrav       = {{ s.ibrav }},
+{%- for idx, val in s.celldm.items() %}
+    celldm({{ idx }})   = {{ "%.6f"|format(val) }},
+{%- endfor %}
+    nat         = {{ s.nat }},
+    ntyp        = {{ s.ntyp }},
+{%- if p.nbnd %}
+    nbnd        = {{ p.nbnd }},
+{%- endif %}
+    ecutwfc     = {{ wf.ecutwfc }},
+    ecutrho     = {{ wf.ecutrho }},
+    input_dft   = '{{ wf.functional }}',
+    nspin       = 1,
+    occupations = '{{ p.occupations }}',
+{%- if p.occupations == 'smearing' %}
+    smearing    = '{{ p.smearing | default("gaussian") }}',
+    degauss     = {{ p.degauss | default(0.007) }},
+{%- endif %}
+    nosym       = .false.,
+    noncolin    = .false.,
+    lspinorb    = .false.,
+/
+&ELECTRONS
+    conv_thr         = {{ p.convThr | qe_sci }},
+    mixing_beta      = {{ p.mixingBeta | default(0.2) }},
+    diagonalization  = 'david',
+    diago_david_ndim = {{ p.diagoDavidNdim | default(8) }},
+    mixing_ndim      = 20,
+    mixing_mode      = 'plain',
+{%- if p.electronMaxstep %}
+    electron_maxstep = {{ p.electronMaxstep }},
+{%- endif %}
+    startingpot      = 'atomic',
+    startingwfc      = 'atomic+random',
+/
+{%- if p.calculation == 'vc-relax' %}
+&IONS
+    ion_dynamics     = '{{ p.ionDynamics | default("bfgs") }}',
+    upscale          = 100,
+    trust_radius_max = 0.8,
+/
+&CELL
+    cell_dynamics  = '{{ p.cellDynamics | default("bfgs") }}',
+    cell_dofree    = '{{ p.cellDofree | default("all") }}',
+    press_conv_thr = 0.5,
+/
+{%- endif %}
+
+ATOMIC_SPECIES
+{%- for sp in s.atomicSpecies %}
+{{ sp.element }}   {{ sp.mass }}  {{ sp.pseudoFile }}
+{%- endfor %}
+{% if s.ibrav == 0 %}
+CELL_PARAMETERS angstrom
+{%- for row in s.cellParameters %}
+  {{ "%.10f"|format(row[0]) }}  {{ "%.10f"|format(row[1]) }}  {{ "%.10f"|format(row[2]) }}
+{%- endfor %}
+{% endif %}
+ATOMIC_POSITIONS {{ '{' }}{{ s.positionsType }}{{ '}' }}
+{%- for pos in s.atomicPositions %}
+{{ pos.element }}    {{ "%.10f"|format(pos.x) }}   {{ "%.10f"|format(pos.y) }}   {{ "%.10f"|format(pos.z) }}
+{%- endfor %}
+
+{% if p.kPoints.type == 'automatic' -%}
+K_POINTS {automatic}
+{{ p.kPoints.grid[0] }} {{ p.kPoints.grid[1] }} {{ p.kPoints.grid[2] }} {{ p.kPoints.shift[0] }} {{ p.kPoints.shift[1] }} {{ p.kPoints.shift[2] }}
+{%- elif p.kPoints.type == 'crystal_b' -%}
+K_POINTS {crystal_b}
+{{ p.kPoints.path | length }}
+{%- for kp in p.kPoints.path %}
+  {{ "%.4f"|format(kp.coords[0]) }}  {{ "%.4f"|format(kp.coords[1]) }}  {{ "%.4f"|format(kp.coords[2]) }}  {{ kp.npoints }}  ! {{ kp.label }}
+{%- endfor %}
+{%- endif %}
+{% if wf.hubbard %}
+HUBBARD {ortho-atomic}
+{%- for h in wf.hubbard %}
+   U {{ h.manifold }} {{ h.value }}
+{%- endfor %}
+{% endif -%}
