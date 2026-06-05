@@ -17,13 +17,21 @@ from jinja2 import Environment, FileSystemLoader
 _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
 # pw.x covers relax/scf/nscf/bands; post-processing executables (bands.x/dos.x/
-# projwfc.x/pp.x) get their own small templates in P0-2b.
+# projwfc.x/pp.x) read from a prior run's prefix+outdir and have their own
+# templates (no structure needed).
 _TEMPLATE_BY_CALC: dict[str, str] = {
     "vc-relax": "pw.in.j2",
     "relax": "pw.in.j2",
     "scf": "pw.in.j2",
     "nscf": "pw.in.j2",
     "bands": "pw.in.j2",
+}
+
+_POSTPROC_TEMPLATE: dict[str, str] = {
+    "ppbands": "bands.in.j2",  # bands.x — reorder/symmetrize eigenvalues for plotting
+    "dos": "dos.in.j2",        # dos.x   — total DOS
+    "pdos": "projwfc.in.j2",   # projwfc.x — projected DOS / LDOS
+    "charge": "pp.in.j2",      # pp.x    — charge density / STM (plot_num)
 }
 
 
@@ -79,3 +87,28 @@ def generate_pw_input(
     }
     unit = {"outdir": outdir or f"./outdir_{calc}"}
     return _env().get_template(template_name).render(wf=wf, unit=unit, s=structure, p=params)
+
+
+def generate_postproc_input(
+    calc_type: str,
+    params: dict[str, Any] | None = None,
+    *,
+    prefix: str,
+    functional: str = "pbe",
+    outdir: str | None = None,
+    name: str | None = None,
+) -> str:
+    """Render a post-processing input: bands.x / dos.x / projwfc.x / pp.x.
+
+    These executables read from a prior scf/nscf run's prefix+outdir — no structure.
+    calc_type : 'ppbands' | 'dos' | 'pdos' | 'charge'.
+    params    : optional — dos/pdos use emin/emax/deltaE/ngauss (template defaults);
+                'charge' requires plotNum (and sampleBias when plotNum == 5).
+    name      : plot label used in charge filenames (default = calc_type).
+    """
+    template_name = _POSTPROC_TEMPLATE.get(calc_type)
+    if template_name is None:
+        raise ValueError(f"unsupported post-processing calc: {calc_type!r}")
+    wf = {"prefix": prefix, "functional": functional}
+    unit = {"outdir": outdir or f"./outdir_{calc_type}", "name": name or calc_type}
+    return _env().get_template(template_name).render(wf=wf, unit=unit, p=params or {})

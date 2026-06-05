@@ -1,0 +1,9 @@
+&DOS
+    prefix  = '{{ wf.prefix }}',
+    outdir  = '{{ unit.outdir }}',
+    fildos  = 'dos/{{ wf.functional | upper }}_{{ wf.prefix }}.dos',
+    Emin    = {{ p.emin | default(-5.0) }},
+    Emax    = {{ p.emax | default(13.0) }},
+    DeltaE  = {{ p.deltaE | default(0.01) }},
+    ngauss  = {{ p.ngauss | default(-1) }},
+/

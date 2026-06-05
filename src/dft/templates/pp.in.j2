@@ -1,0 +1,15 @@
+&INPUTPP
+    prefix      = '{{ wf.prefix }}',
+    outdir      = '{{ unit.outdir }}',
+    filplot     = 'charge/{{ unit.name }}_{{ wf.prefix }}.charge',
+    plot_num    = {{ p.plotNum }},
+{%- if p.plotNum == 5 %}
+    sample_bias = {{ "%+.1f"|format(p.sampleBias) }},
+{%- endif %}
+/
+&PLOT
+    nfile         = 1,
+    iflag         = {{ p.iflag | default(3) }},
+    output_format = {{ p.outputFormat | default(6) }},
+    fileout       = 'charge/{{ unit.name }}_{{ wf.prefix }}.cube',
+/

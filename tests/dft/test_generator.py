@@ -5,7 +5,7 @@
 import pytest
 from pymatgen.core import Lattice, Structure
 
-from src.dft.generator import generate_pw_input, qe_bool, qe_sci
+from src.dft.generator import generate_postproc_input, generate_pw_input, qe_bool, qe_sci
 from src.dft.kpath import get_kpath
 from src.dft.structure import to_dft_structure
 
@@ -100,3 +100,50 @@ def test_ibrav0_renders_cell_parameters():
 def test_unsupported_calc_raises():
     with pytest.raises(ValueError, match="unsupported"):
         generate_pw_input(_s(), {"calculation": "dos", "kPoints": {}}, prefix="x", ecutwfc=1, ecutrho=1)
+
+
+# ── post-processing executables (bands.x / dos.x / projwfc.x / pp.x) ──────────
+
+
+def test_postproc_bands():
+    out = generate_postproc_input("ppbands", prefix="TiO2", functional="pbe", outdir="./out")
+    assert "&BANDS" in out
+    assert "bands/PBE_TiO2.band" in out
+    assert "lsym        = .true." in out
+
+
+def test_postproc_dos_defaults():
+    out = generate_postproc_input("dos", prefix="TiO2", functional="pbe")
+    assert "&DOS" in out
+    assert "dos/PBE_TiO2.dos" in out
+    assert "Emin    = -5.0" in out and "Emax    = 13.0" in out  # template defaults
+    assert "ngauss  = -1" in out
+
+
+def test_postproc_pdos_overrides():
+    out = generate_postproc_input("pdos", {"emin": -8.0, "emax": 10.0}, prefix="WO3", functional="pbe")
+    assert "&PROJWFC" in out
+    assert "pdos/PBE_WO3.pdos" in out
+    assert "Emin    = -8.0" in out and "Emax    = 10.0" in out
+
+
+def test_postproc_charge_stm_sample_bias():
+    out = generate_postproc_input(
+        "charge", {"plotNum": 5, "sampleBias": 0.1}, prefix="WO3", name="stm", functional="hse"
+    )
+    assert "&INPUTPP" in out and "&PLOT" in out
+    assert "plot_num    = 5" in out
+    assert "sample_bias = +0.1" in out
+    assert "charge/stm_WO3.cube" in out
+
+
+def test_postproc_charge_no_sample_bias_when_not_5():
+    out = generate_postproc_input("charge", {"plotNum": 0}, prefix="WO3", name="rho")
+    assert "plot_num    = 0" in out
+    assert "sample_bias" not in out
+    assert "charge/rho_WO3.charge" in out
+
+
+def test_postproc_unsupported_raises():
+    with pytest.raises(ValueError, match="unsupported post-processing"):
+        generate_postproc_input("scf", prefix="x")  # scf is pw.x, not post-proc
