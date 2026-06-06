@@ -154,3 +154,12 @@ def test_resume_after_completion_finds_next():
     assert not w.is_done()
     w.mark_completed("dos")
     assert w.is_done() and w.overall_status() == COMPLETED
+
+
+def test_depends_on_and_ancestors():
+    w = WorkflowState(_branch())  # relax → scf → {bands, dos}
+    assert w.depends_on("scf") == ("relax",)
+    assert w.depends_on("relax") == ()
+    assert w.ancestors("bands") == {"scf", "relax"}
+    assert w.ancestors("scf") == {"relax"}
+    assert w.ancestors("relax") == set()

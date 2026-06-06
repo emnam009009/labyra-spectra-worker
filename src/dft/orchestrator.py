@@ -92,6 +92,21 @@ class WorkflowState:
     def calc_type(self, uid: str) -> str | None:
         return self._units[uid].calc_type
 
+    def depends_on(self, uid: str) -> tuple[str, ...]:
+        return self._units[uid].depends_on
+
+    def ancestors(self, uid: str) -> set[str]:
+        """All transitive dependencies of ``uid`` (walks dependsOn upward)."""
+        seen: set[str] = set()
+        stack = list(self._units[uid].depends_on)
+        while stack:
+            cur = stack.pop()
+            if cur in seen:
+                continue
+            seen.add(cur)
+            stack.extend(self._units[cur].depends_on)
+        return seen
+
     # ── scheduling ──
     def next_runnable(self) -> list[str]:
         """Unit ids that may start now: pending with all deps completed."""
