@@ -56,6 +56,7 @@ class FirestoreGcsBatchIO:
         topic: str | None = None,
         service_account: str | None = None,
         machine_preset: str = "low",
+        use_spot: bool = True,
         nproc: int = 1,
         prefix: str = "pwscf",
         firestore_client: Any | None = None,
@@ -70,6 +71,7 @@ class FirestoreGcsBatchIO:
         self.topic = topic
         self.service_account = service_account
         self.machine_preset = machine_preset
+        self.use_spot = use_spot
         self.nproc = nproc
         self.prefix = prefix
         self._fs = firestore_client
@@ -198,6 +200,7 @@ class FirestoreGcsBatchIO:
         manifest = build_batch_job(
             self.image_uri, [],
             machine_preset=self.machine_preset,
+            use_spot=self.use_spot,
             env=env,
             labels={"dft_tenant": tenant_id, "dft_workflow": workflow_id, "dft_unit": unit_id},
             notifications_topic=self.topic,

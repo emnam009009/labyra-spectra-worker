@@ -147,6 +147,7 @@ def _dft_io() -> Any:
         project=s.gcp_project_id, region=s.gcp_region, bucket=s.dft_bucket,
         image_uri=s.dft_image_uri, topic=s.dft_advance_topic,
         service_account=s.dft_batch_sa, machine_preset=s.dft_machine_preset,
+        use_spot=s.dft_use_spot,
     )
 
 

@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     dft_advance_topic: str = "projects/labyra-app-dev/topics/dft-advance"
     dft_batch_sa: str = "spectra-worker@labyra-app-dev.iam.gserviceaccount.com"
     dft_machine_preset: str = "low"
+    dft_use_spot: bool = False  # smoke=on-demand (deterministic); DFT_USE_SPOT=true for prod
     firebase_bucket: str = ""
 
     anthropic_api_key: str = ""
