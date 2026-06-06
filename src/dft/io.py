@@ -192,7 +192,10 @@ class FirestoreGcsBatchIO:
         params = {**(unit.get("params") or {}), "calculation": calc_type}
         # VM preset: per-unit > workflow > io default. NPROC = explicit override or preset vCPU.
         preset = unit.get("machinePreset") or doc.get("machinePreset") or self.machine_preset
-        nproc = self.nproc if self.nproc is not None else preset_vcpu(preset)
+        # MPI ranks = physical cores = vCPU/2 (GCP vCPU = 1 hyperthread; OpenMPI counts
+        # slots = physical cores, so np must be ≤ cores. Pure-MPI on physical cores is also
+        # optimal for memory-bandwidth-bound plane-wave QE — HT gives little/negative gain).
+        nproc = self.nproc if self.nproc is not None else max(1, preset_vcpu(preset) // 2)
         max_run = unit.get("maxRunSec") or doc.get("maxRunSec") or self.max_run_sec
 
         in_text = self._render(calc_type, structure, global_params, params)

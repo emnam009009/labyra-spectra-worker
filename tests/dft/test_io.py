@@ -149,7 +149,7 @@ def test_launch_uses_workflow_preset_and_nproc():
     io.launch("t1", "w1", "scf", "scf", SI_WF["structure"], SI_WF["global"], [])
     _job, manifest = submitted[0]
     env = manifest["taskGroups"][0]["taskSpec"]["runnables"][0]["environment"]["variables"]
-    assert env["NPROC"] == "16"  # bulk = c2d-standard-16 → 16 MPI ranks
+    assert env["NPROC"] == "8"  # bulk c2d-standard-16 → 8 physical cores (16 vCPU / 2)
     pol = manifest["allocationPolicy"]["instances"][0]["policy"]
     assert pol["machineType"] == "c2d-standard-16"
     assert "computeResource" not in manifest["taskGroups"][0]["taskSpec"]
@@ -166,7 +166,7 @@ def test_per_unit_preset_overrides_workflow():
     io.launch("t1", "w1", "relax", "vc-relax", wf["structure"], wf["global"], [])
     _job, manifest = submitted[0]
     env = manifest["taskGroups"][0]["taskSpec"]["runnables"][0]["environment"]["variables"]
-    assert env["NPROC"] == "32"  # unit override bulk-large
+    assert env["NPROC"] == "16"  # bulk-large c2d-standard-32 → 16 physical cores
     assert manifest["allocationPolicy"]["instances"][0]["policy"]["machineType"] == "c2d-standard-32"
 
 
