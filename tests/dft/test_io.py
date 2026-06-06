@@ -176,3 +176,16 @@ def test_max_run_sec_workflow_override():
     io.launch("t1", "w1", "scf", "scf", SI_WF["structure"], SI_WF["global"], [])
     _job, manifest = submitted[0]
     assert manifest["taskGroups"][0]["taskSpec"]["maxRunDuration"] == "7200s"
+
+
+def test_launch_derives_calculation_from_calc_type():
+    """A workflow unit needs only calcType (no params.calculation) — io derives it."""
+    import copy
+    wf = copy.deepcopy(SI_WF)
+    for u in wf["units"]:
+        u["params"].pop("calculation", None)  # remove the duplication
+    io, _fs, gcs, _s, _d = _io(to_dict=wf)
+    io.load("t1", "w1")
+    io.launch("t1", "w1", "scf", "scf", wf["structure"], wf["global"], [])
+    in_text = gcs.bucket.return_value.blob.return_value.upload_from_string.call_args.args[0]
+    assert "calculation    = 'scf'" in in_text  # derived from calc_type, not params

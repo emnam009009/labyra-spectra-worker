@@ -187,7 +187,9 @@ class FirestoreGcsBatchIO:
         doc = self._cache.get((tenant_id, workflow_id), {})
         units_by_id = {u["id"]: u for u in doc.get("units", [])}
         unit = units_by_id.get(unit_id, {}) or {}
-        params = unit.get("params") or {}
+        # calcType is the single source of truth → derive params.calculation so a workflow
+        # only needs calcType at the unit level (no brittle duplication into params).
+        params = {**(unit.get("params") or {}), "calculation": calc_type}
         # VM preset: per-unit > workflow > io default. NPROC = explicit override or preset vCPU.
         preset = unit.get("machinePreset") or doc.get("machinePreset") or self.machine_preset
         nproc = self.nproc if self.nproc is not None else preset_vcpu(preset)
