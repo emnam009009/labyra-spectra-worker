@@ -69,6 +69,9 @@ def build_batch_job(
     use_spot: bool = True,
     env: dict[str, str] | None = None,
     gpu_count: int = 1,
+    labels: dict[str, str] | None = None,
+    notifications_topic: str | None = None,
+    service_account: str | None = None,
 ) -> dict[str, Any]:
     """Build a guardrailed Cloud Batch job manifest (dict).
 
@@ -81,9 +84,10 @@ def build_batch_job(
         )
     preset = MACHINE_PRESETS[machine_preset]
 
-    runnable: dict[str, Any] = {
-        "container": {"imageUri": image_uri, "commands": list(commands)}
-    }
+    container: dict[str, Any] = {"imageUri": image_uri}
+    if commands:  # omit for ENTRYPOINT-driven images (QE image reads env, runs entrypoint)
+        container["commands"] = list(commands)
+    runnable: dict[str, Any] = {"container": container}
     if env:
         runnable["environment"] = {"variables": dict(env)}
 
@@ -104,11 +108,24 @@ def build_batch_job(
         policy["accelerators"] = [{"type": preset["gpu"], "count": gpu_count}]
         instance["installGpuDrivers"] = True
 
-    return {
+    allocation: dict[str, Any] = {"instances": [instance]}
+    if service_account:  # Batch VM runs as this SA (needs storage.objectAdmin on the bucket)
+        allocation["serviceAccount"] = {"email": service_account}
+    job: dict[str, Any] = {
         "taskGroups": [{"taskSpec": task_spec, "taskCount": 1, "parallelism": 1}],
-        "allocationPolicy": {"instances": [instance]},
+        "allocationPolicy": allocation,
         "logsPolicy": {"destination": "CLOUD_LOGGING"},
     }
+    if labels:
+        # mapped back to (tenant, workflow, unit) via get_job on a Batch notification
+        job["labels"] = dict(labels)
+    if notifications_topic:
+        # Batch publishes JobUID/JobName/NewJobState/Type to this topic on every job
+        # state change; the /dft/advance handler acts on SUCCEEDED/FAILED, no-ops the rest.
+        job["notifications"] = [
+            {"pubsubTopic": notifications_topic, "message": {"type": "JOB_STATE_CHANGED"}}
+        ]
+    return job
 
 
 # ── SDK wrappers (thin; lazy-import SDK; mocked in tests, real GCP at runtime) ─

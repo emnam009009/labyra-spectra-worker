@@ -141,3 +141,57 @@ def test_cancel_job_calls_cancel_with_mock():
     client = MagicMock()
     cancel_job("projects/p/locations/r/jobs/j1", client=client)
     client.cancel_job.assert_called_once_with(name="projects/p/locations/r/jobs/j1")
+
+
+def test_labels_and_notifications_in_manifest():
+    job = build_batch_job(
+        IMAGE, ["pw.x", "-in", "a.in"],
+        labels={"dft_tenant": "t1", "dft_workflow": "w1", "dft_unit": "scf"},
+        notifications_topic="projects/p/topics/dft-advance",
+    )
+    assert job["labels"] == {"dft_tenant": "t1", "dft_workflow": "w1", "dft_unit": "scf"}
+    notif = job["notifications"][0]
+    assert notif["pubsubTopic"] == "projects/p/topics/dft-advance"
+    assert notif["message"]["type"] == "JOB_STATE_CHANGED"
+
+
+def test_no_labels_no_notifications_by_default():
+    job = build_batch_job(IMAGE, ["pw.x"])
+    assert "labels" not in job
+    assert "notifications" not in job
+
+
+def test_manifest_with_notifications_validates_against_proto():
+    batch_v1 = pytest.importorskip("google.cloud.batch_v1")
+    from google.protobuf import json_format
+
+    job = build_batch_job(
+        IMAGE, ["pw.x", "-in", "a.in"], machine_preset="high-gpu",
+        labels={"dft_tenant": "t1", "dft_workflow": "w1", "dft_unit": "relax"},
+        notifications_topic="projects/p/topics/dft-advance",
+    )
+    j = batch_v1.Job()
+    json_format.ParseDict(job, j._pb)  # raises if labels/notifications fields are wrong
+    assert dict(j.labels)["dft_unit"] == "relax"
+    assert j.notifications[0].pubsub_topic == "projects/p/topics/dft-advance"
+
+
+def test_service_account_and_empty_commands():
+    job = build_batch_job(IMAGE, [], service_account="sa@p.iam.gserviceaccount.com",
+                          env={"QE_BINARY": "pw.x"})
+    container = job["taskGroups"][0]["taskSpec"]["runnables"][0]["container"]
+    assert container == {"imageUri": IMAGE}          # commands omitted → entrypoint runs
+    assert job["allocationPolicy"]["serviceAccount"] == {"email": "sa@p.iam.gserviceaccount.com"}
+
+
+def test_empty_commands_and_sa_validate_against_proto():
+    batch_v1 = pytest.importorskip("google.cloud.batch_v1")
+    from google.protobuf import json_format
+    job = build_batch_job(IMAGE, [], machine_preset="low",
+                          env={"QE_BINARY": "pw.x", "QE_IN": "scf.in"},
+                          service_account="sa@p.iam.gserviceaccount.com",
+                          notifications_topic="projects/p/topics/dft-advance",
+                          labels={"dft_unit": "scf"})
+    j = batch_v1.Job(); json_format.ParseDict(job, j._pb)
+    assert j.allocation_policy.service_account.email == "sa@p.iam.gserviceaccount.com"
+
