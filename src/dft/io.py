@@ -59,6 +59,7 @@ class FirestoreGcsBatchIO:
         use_spot: bool = True,
         nproc: int | None = None,  # None → derive from preset vCPU
         max_run_sec: int = 3600,
+        npool: int = 1,  # k-point parallelization (-npool); pw.x only, postproc ignores
         prefix: str = "pwscf",
         firestore_client: Any | None = None,
         storage_client: Any | None = None,
@@ -75,6 +76,7 @@ class FirestoreGcsBatchIO:
         self.use_spot = use_spot
         self.nproc = nproc
         self.max_run_sec = max_run_sec
+        self.npool = npool
         self.prefix = prefix
         self._fs = firestore_client
         self._gcs = storage_client
@@ -120,6 +122,7 @@ class FirestoreGcsBatchIO:
     def create_workflow(
         self, tenant_id: str, workflow_id: str, workflow: dict[str, Any],
         *, machine_preset: str | None = None, max_run_sec: int | None = None,
+        npool: int | None = None,
     ) -> None:
         """Persist a new workflow doc (structure/global/units + empty state)."""
         payload: dict[str, Any] = {
@@ -135,6 +138,8 @@ class FirestoreGcsBatchIO:
             payload["machinePreset"] = machine_preset
         if max_run_sec:
             payload["maxRunSec"] = int(max_run_sec)
+        if npool:
+            payload["npool"] = int(npool)
         try:
             from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 
@@ -197,6 +202,7 @@ class FirestoreGcsBatchIO:
         # optimal for memory-bandwidth-bound plane-wave QE — HT gives little/negative gain).
         nproc = self.nproc if self.nproc is not None else max(1, preset_vcpu(preset) // 2)
         max_run = unit.get("maxRunSec") or doc.get("maxRunSec") or self.max_run_sec
+        npool = unit.get("npool") or doc.get("npool") or self.npool
 
         in_text = self._render(calc_type, structure, global_params, params)
         in_name, out_name = f"{calc_type}.in", f"{calc_type}.out"
@@ -212,6 +218,7 @@ class FirestoreGcsBatchIO:
             "GCS_PSEUDO": f"gs://{self.bucket}/{self.pseudo_prefix}",
             "NPROC": str(nproc),
             "OMP_NUM_THREADS": "1",
+            "NPOOL": str(npool),  # entrypoint applies -npool only when >1 AND binary is pw.x
         }
         deps = " ".join(f"gs://{self.bucket}/workflows/{workflow_id}/units/{d}" for d in gcs_deps)
         if deps:

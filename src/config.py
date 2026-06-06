@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     dft_machine_preset: str = "low"
     dft_use_spot: bool = False  # smoke=on-demand (deterministic); DFT_USE_SPOT=true for prod
     dft_max_run_sec: int = 3600  # per-task Batch timeout cap (fail-fast). Override per-workflow via maxRunSec.
+    dft_npool: int = 1  # k-point parallel (-npool) for pw.x; prod dense-k: DFT_NPOOL=4. per-workflow via submit npool.
     firebase_bucket: str = ""
 
     anthropic_api_key: str = ""

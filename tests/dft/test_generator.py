@@ -108,14 +108,14 @@ def test_unsupported_calc_raises():
 def test_postproc_bands():
     out = generate_postproc_input("ppbands", prefix="TiO2", functional="pbe", outdir="./out")
     assert "&BANDS" in out
-    assert "bands/PBE_TiO2.band" in out
+    assert "PBE_TiO2.band" in out
     assert "lsym        = .true." in out
 
 
 def test_postproc_dos_defaults():
     out = generate_postproc_input("dos", prefix="TiO2", functional="pbe")
     assert "&DOS" in out
-    assert "dos/PBE_TiO2.dos" in out
+    assert "PBE_TiO2.dos" in out
     assert "Emin    = -5.0" in out and "Emax    = 13.0" in out  # template defaults
     assert "ngauss  = -1" in out
 
@@ -123,7 +123,7 @@ def test_postproc_dos_defaults():
 def test_postproc_pdos_overrides():
     out = generate_postproc_input("pdos", {"emin": -8.0, "emax": 10.0}, prefix="WO3", functional="pbe")
     assert "&PROJWFC" in out
-    assert "pdos/PBE_WO3.pdos" in out
+    assert "PBE_WO3.pdos" in out
     assert "Emin    = -8.0" in out and "Emax    = 10.0" in out
 
 

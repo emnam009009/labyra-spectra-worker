@@ -24,7 +24,16 @@ set -uo pipefail
 : "${GCS_WORK:?GCS_WORK required}"
 QE_OUT="${QE_OUT:-${QE_IN%.in}.out}"
 NPROC="${NPROC:-1}"
+NPOOL="${NPOOL:-1}"
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
+
+# -npool (k-point parallelization) speeds up dense-k pw.x runs (scf/nscf/bands) by
+# splitting k-points across pools. Apply ONLY to pw.x; postproc (dos.x/projwfc.x/bands.x)
+# run npool=1 (their I/O can break under pools, and they're cheap anyway).
+POOLFLAG=()
+if [ "$NPOOL" -gt 1 ] && [ "$(basename "$QE_BINARY")" = "pw.x" ]; then
+  POOLFLAG=(-npool "$NPOOL")
+fi
 
 WORK=/scratch/work
 mkdir -p "$WORK/out"
@@ -46,11 +55,11 @@ if [ -n "${GCS_DEPS:-}" ]; then
   done
 fi
 
-echo "[entrypoint] run: $QE_BINARY -in $QE_IN  (np=$NPROC, omp=$OMP_NUM_THREADS)"
+echo "[entrypoint] run: $QE_BINARY ${POOLFLAG[*]:-} -in $QE_IN  (np=$NPROC, omp=$OMP_NUM_THREADS, npool=$NPOOL)"
 if [ "$NPROC" -gt 1 ]; then
-  mpirun --allow-run-as-root -np "$NPROC" "$QE_BINARY" -in "$QE_IN" > "$QE_OUT" 2>&1
+  mpirun --allow-run-as-root -np "$NPROC" "$QE_BINARY" ${POOLFLAG[@]+"${POOLFLAG[@]}"} -in "$QE_IN" > "$QE_OUT" 2>&1
 else
-  "$QE_BINARY" -in "$QE_IN" > "$QE_OUT" 2>&1
+  "$QE_BINARY" ${POOLFLAG[@]+"${POOLFLAG[@]}"} -in "$QE_IN" > "$QE_OUT" 2>&1
 fi
 RC=$?
 echo "[entrypoint] QE exit code: $RC"

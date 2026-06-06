@@ -147,7 +147,7 @@ def _dft_io() -> Any:
         project=s.gcp_project_id, region=s.gcp_region, bucket=s.dft_bucket,
         image_uri=s.dft_image_uri, topic=s.dft_advance_topic,
         service_account=s.dft_batch_sa, machine_preset=s.dft_machine_preset,
-        use_spot=s.dft_use_spot, max_run_sec=s.dft_max_run_sec,
+        use_spot=s.dft_use_spot, max_run_sec=s.dft_max_run_sec, npool=s.dft_npool,
     )
 
 
@@ -163,7 +163,8 @@ def submit_workflow(req: SubmitRequest) -> dict[str, Any]:
     io = _dft_io()
     try:
         io.create_workflow(req.tenantId, req.workflowId, wf,
-                           machine_preset=req.machinePreset, max_run_sec=req.maxRunSec)
+                           machine_preset=req.machinePreset, max_run_sec=req.maxRunSec,
+                           npool=req.npool)
         overall = advance(io, req.tenantId, req.workflowId, None)
     except FatalError as exc:
         raise HTTPException(status_code=400, detail=str(exc)[:300]) from exc

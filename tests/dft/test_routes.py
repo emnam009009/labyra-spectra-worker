@@ -94,7 +94,7 @@ class _FakeIO:
     def __init__(self):
         self.created = []
 
-    def create_workflow(self, t, w, wf, *, machine_preset=None, max_run_sec=None):
+    def create_workflow(self, t, w, wf, *, machine_preset=None, max_run_sec=None, npool=None):
         self.created.append((t, w, wf, machine_preset, max_run_sec))
 
 

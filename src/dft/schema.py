@@ -69,3 +69,4 @@ class SubmitRequest(BaseModel):
     workflow: dict[str, Any]  # {structure, global, units}
     machinePreset: str | None = None  # per-workflow VM preset (low/standard/bulk/bulk-large); units may override
     maxRunSec: int | None = None  # per-task timeout cap (fail-fast control knob)
+    npool: int | None = None  # k-point parallelization (-npool) for pw.x; speeds dense-k scf/nscf/bands
