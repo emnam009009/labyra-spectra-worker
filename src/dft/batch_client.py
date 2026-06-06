@@ -167,6 +167,16 @@ def get_job_state(job_name: str, client: Any | None = None) -> str:
     return batch_v1.JobStatus.State(job.status.state).name
 
 
+def get_job_labels(job_name: str, client: Any | None = None) -> dict[str, str]:
+    """Read a Batch job's labels (the /dft/advance handler maps JobName →
+    {dft_tenant, dft_workflow, dft_unit}, since the notification carries only JobName)."""
+    from google.cloud import batch_v1
+
+    client = client or _client()
+    job = client.get_job(name=job_name)
+    return dict(job.labels)
+
+
 def cancel_job(job_name: str, client: Any | None = None) -> None:
     """Request cancellation of a running Batch job (the [Stop job] action)."""
     client = client or _client()

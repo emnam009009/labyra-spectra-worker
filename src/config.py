@@ -12,6 +12,12 @@ class Settings(BaseSettings):
 
     gcp_project_id: str = "labyra-app-dev"
     gcp_region: str = "asia-southeast1"
+    # DFT/Computation (cloud-batch backend) — overridable via DFT_* env in deploy.sh
+    dft_bucket: str = "labyra-app-dev-dft"
+    dft_image_uri: str = "asia-southeast1-docker.pkg.dev/labyra-app-dev/dft/quantum-espresso:7.4.1"
+    dft_advance_topic: str = "projects/labyra-app-dev/topics/dft-advance"
+    dft_batch_sa: str = "spectra-worker@labyra-app-dev.iam.gserviceaccount.com"
+    dft_machine_preset: str = "low"
     firebase_bucket: str = ""
 
     anthropic_api_key: str = ""

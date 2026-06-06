@@ -8,6 +8,8 @@ with `app.include_router(router)`.
   POST /dft/structure  — CIF/POSCAR/MP-id → DftStructure (ibrav-verified)
   POST /dft/kpath      — structure source → seekpath BZ path (bands crystal_b)
   POST /dft/generate   — structure + units → rendered ordered QE .in files
+  POST /dft/submit     — persist a DftWorkflow + launch root units (cloud-batch)
+  POST /dft/advance    — Pub/Sub push (Batch JobStateChanged) → advance the DAG
 
 @phase R272w-c (DFT P0 — endpoints)
 """
@@ -15,11 +17,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, status
 
 from src.dft import structure as dft_structure
 from src.dft.generator import generate_postproc_input, generate_pw_input
-from src.dft.schema import GenerateRequest, GenerateResponse, StructureRequest
+from src.dft.batch_client import get_job_labels
+from src.dft.driver import advance
+from src.dft.errors import FatalError
+from src.dft.schema import (
+    GenerateRequest,
+    GenerateResponse,
+    StructureRequest,
+    SubmitRequest,
+)
 
 router = APIRouter(prefix="/dft", tags=["dft"])
 
@@ -125,3 +135,71 @@ def generate(req: GenerateRequest) -> GenerateResponse:
             "executable": _EXECUTABLE.get(unit.calcType), "input": text,
         })
     return GenerateResponse(units=out)
+
+
+def _dft_io() -> Any:
+    """Build the Firestore+GCS+Batch DftIO from settings (per request; tests monkeypatch)."""
+    from src.config import get_settings
+    from src.dft.io import FirestoreGcsBatchIO
+
+    s = get_settings()
+    return FirestoreGcsBatchIO(
+        project=s.gcp_project_id, region=s.gcp_region, bucket=s.dft_bucket,
+        image_uri=s.dft_image_uri, topic=s.dft_advance_topic,
+        service_account=s.dft_batch_sa, machine_preset=s.dft_machine_preset,
+    )
+
+
+@router.post("/submit")
+def submit_workflow(req: SubmitRequest) -> dict[str, Any]:
+    """Persist a DftWorkflow then launch its root units on Cloud Batch (one tick).
+
+    Subsequent ticks are driven by Batch JobStateChanged notifications → /dft/advance.
+    """
+    wf = req.workflow
+    if "structure" not in wf or "units" not in wf:
+        raise HTTPException(status_code=400, detail="workflow needs 'structure' and 'units'")
+    io = _dft_io()
+    try:
+        io.create_workflow(req.tenantId, req.workflowId, wf)
+        overall = advance(io, req.tenantId, req.workflowId, None)
+    except FatalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)[:300]) from exc
+    return {"workflowId": req.workflowId, "overallStatus": overall}
+
+
+@router.post("/advance", status_code=status.HTTP_204_NO_CONTENT)
+async def advance_workflow(request: Request) -> None:
+    """Pub/Sub push endpoint for Batch job-state-change notifications.
+
+    Batch puts JobUID/JobName/NewJobState/Type in message ATTRIBUTES (data is empty).
+    We act only on terminal SUCCEEDED/FAILED, map JobName → labels → advance the DAG.
+
+    Ack semantics (mirror the papers handler):
+      204 → ack (success or ignored intermediate state) · 400 → ack, no retry (FatalError)
+      5xx → nack, Pub/Sub retries → DLQ.
+    """
+    envelope: dict[str, Any] = await request.json()
+    message = envelope.get("message")
+    if not isinstance(message, dict):
+        raise HTTPException(status_code=400, detail="Invalid Pub/Sub envelope")
+    attrs = message.get("attributes") or {}
+    if attrs.get("Type") != "JOB_STATE_CHANGED" or attrs.get("NewJobState") not in ("SUCCEEDED", "FAILED"):
+        return  # 204 — ignore QUEUED/SCHEDULED/RUNNING/etc.
+    job_name = attrs.get("JobName")
+    if not job_name:
+        return
+
+    try:
+        labels = get_job_labels(job_name)
+        tenant_id = labels.get("dft_tenant")
+        workflow_id = labels.get("dft_workflow")
+        unit_id = labels.get("dft_unit")
+        if not (tenant_id and workflow_id and unit_id):
+            return  # not one of ours — ack
+        advance(_dft_io(), tenant_id, workflow_id,
+                {"unitId": unit_id, "state": attrs["NewJobState"]})
+    except FatalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)[:300]) from exc
+    except Exception as exc:  # noqa: BLE001 — HTTP boundary; 5xx → Pub/Sub retry
+        raise HTTPException(status_code=500, detail=str(exc)[:300]) from exc

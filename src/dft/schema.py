@@ -59,3 +59,11 @@ class GeneratedUnit(BaseModel):
 
 class GenerateResponse(BaseModel):
     units: list[GeneratedUnit]
+
+
+class SubmitRequest(BaseModel):
+    """Body for POST /dft/submit — persist a DftWorkflow + launch its root units."""
+
+    tenantId: str
+    workflowId: str
+    workflow: dict[str, Any]  # {structure, global, units}

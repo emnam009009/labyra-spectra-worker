@@ -111,6 +111,32 @@ class FirestoreGcsBatchIO:
                 return u.get("calcType") or u.get("calc_type") or ""
         return ""
 
+    # ── workflow lifecycle ──
+    def create_workflow(
+        self, tenant_id: str, workflow_id: str, workflow: dict[str, Any]
+    ) -> None:
+        """Persist a new workflow doc (structure/global/units + empty state)."""
+        payload: dict[str, Any] = {
+            "schemaVersion": 1,
+            "structure": workflow["structure"],
+            "global": workflow.get("global", {}),
+            "units": workflow["units"],
+            "snapshot": {},
+            "relaxedStructures": {},
+            "overallStatus": "pending",
+        }
+        try:
+            from google.cloud.firestore_v1 import SERVER_TIMESTAMP
+
+            payload["createdAt"] = SERVER_TIMESTAMP
+        except ImportError:
+            pass
+        self._doc(tenant_id, workflow_id).set(payload, merge=True)
+        self._cache[(tenant_id, workflow_id)] = {
+            "units": workflow["units"], "structure": workflow["structure"],
+            "global": workflow.get("global", {}), "snapshot": {}, "relaxedStructures": {},
+        }
+
     # ── DftIO protocol ──
     def load(self, tenant_id: str, workflow_id: str) -> dict[str, Any]:
         snap = self._doc(tenant_id, workflow_id).get()

@@ -79,3 +79,78 @@ def test_generate_pw_without_structure_400():
         "units": [{"id": "z", "calcType": "scf", "params": {}}],
     })
     assert r.status_code == 400
+
+
+# ── /dft/submit + /dft/advance (mock io/advance/get_job_labels) ──────────────
+import json as _json  # noqa: E402
+import os as _os  # noqa: E402
+
+import src.dft.routes as routes  # noqa: E402
+
+_SI_WF = _json.load(open(_os.path.join(_os.path.dirname(__file__), "fixtures", "si_workflow.json")))
+
+
+class _FakeIO:
+    def __init__(self):
+        self.created = []
+
+    def create_workflow(self, t, w, wf):
+        self.created.append((t, w, wf))
+
+
+def test_submit_persists_and_launches(monkeypatch):
+    fake = _FakeIO()
+    calls = []
+    monkeypatch.setattr(routes, "_dft_io", lambda: fake)
+    monkeypatch.setattr(routes, "advance", lambda io, t, w, e: (calls.append((t, w, e)) or "running"))
+    r = client.post("/dft/submit", json={
+        "tenantId": "t1", "workflowId": "w1",
+        "workflow": {"structure": _SI_WF["structure"], "global": _SI_WF["global"], "units": _SI_WF["units"]},
+    })
+    assert r.status_code == 200
+    assert r.json() == {"workflowId": "w1", "overallStatus": "running"}
+    assert fake.created and fake.created[0][:2] == ("t1", "w1")
+    assert calls == [("t1", "w1", None)]  # advance(start)
+
+
+def test_submit_rejects_bad_workflow():
+    r = client.post("/dft/submit", json={"tenantId": "t1", "workflowId": "w1", "workflow": {"units": []}})
+    assert r.status_code == 400  # missing 'structure'
+
+
+def _pubsub_envelope(job_state, job_name="projects/p/locations/r/jobs/dft-w1-relax", mtype="JOB_STATE_CHANGED"):
+    return {"message": {"attributes": {"Type": mtype, "NewJobState": job_state, "JobName": job_name}}}
+
+
+def test_advance_succeeded_maps_labels_and_advances(monkeypatch):
+    calls = []
+    monkeypatch.setattr(routes, "get_job_labels",
+                        lambda name: {"dft_tenant": "t1", "dft_workflow": "w1", "dft_unit": "relax"})
+    monkeypatch.setattr(routes, "_dft_io", lambda: object())
+    monkeypatch.setattr(routes, "advance", lambda io, t, w, e: calls.append((t, w, e)) or "running")
+    r = client.post("/dft/advance", json=_pubsub_envelope("SUCCEEDED"))
+    assert r.status_code == 204
+    assert calls == [("t1", "w1", {"unitId": "relax", "state": "SUCCEEDED"})]
+
+
+def test_advance_ignores_intermediate_state(monkeypatch):
+    calls = []
+    monkeypatch.setattr(routes, "advance", lambda *a: calls.append(a))
+    r = client.post("/dft/advance", json=_pubsub_envelope("RUNNING"))
+    assert r.status_code == 204
+    assert calls == []  # no-op tick
+
+
+def test_advance_missing_labels_acks(monkeypatch):
+    calls = []
+    monkeypatch.setattr(routes, "get_job_labels", lambda name: {})  # not ours
+    monkeypatch.setattr(routes, "_dft_io", lambda: object())
+    monkeypatch.setattr(routes, "advance", lambda *a: calls.append(a))
+    r = client.post("/dft/advance", json=_pubsub_envelope("FAILED"))
+    assert r.status_code == 204
+    assert calls == []
+
+
+def test_advance_bad_envelope():
+    r = client.post("/dft/advance", json={"no_message": True})
+    assert r.status_code == 400
