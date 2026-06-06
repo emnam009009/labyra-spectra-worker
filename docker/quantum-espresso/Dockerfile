@@ -13,7 +13,7 @@ FROM ubuntu:24.04 AS build
 ENV DEBIAN_FRONTEND=noninteractive
 ARG QE_VERSION=7.4.1
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl gfortran gcc g++ make cmake \
+        ca-certificates curl git gfortran gcc g++ make cmake \
         libopenmpi-dev openmpi-bin libfftw3-dev libblas-dev liblapack-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
@@ -34,7 +34,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # QE runtime libs + gsutil (google-cloud-cli) for input/output staging.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl gnupg \
-        openmpi-bin libfftw3-3 libblas3 liblapack3 libgfortran5 libgomp1 \
+        openmpi-bin libfftw3-double3 libfftw3-single3 libblas3 liblapack3 libgfortran5 libgomp1 \
     && echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
          > /etc/apt/sources.list.d/google-cloud-sdk.list \
     && curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
