@@ -67,3 +67,5 @@ class SubmitRequest(BaseModel):
     tenantId: str
     workflowId: str
     workflow: dict[str, Any]  # {structure, global, units}
+    machinePreset: str | None = None  # per-workflow VM preset (low/standard/bulk/bulk-large); units may override
+    maxRunSec: int | None = None  # per-task timeout cap (fail-fast control knob)

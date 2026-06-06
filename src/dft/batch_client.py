@@ -31,13 +31,24 @@ logger = logging.getLogger(__name__)
 
 # Machine presets — combo, not raw cpu/mem (§9.6). L4 GPU attaches to the g2 family.
 MACHINE_PRESETS: dict[str, dict[str, Any]] = {
-    "low": {"cpuMilli": 4000, "memoryMib": 16384, "gpu": None, "machineType": None},
-    "standard": {"cpuMilli": 8000, "memoryMib": 32768, "gpu": None, "machineType": None},
-    "high-gpu": {
-        "cpuMilli": 8000, "memoryMib": 32768,
-        "gpu": "nvidia-l4", "machineType": "g2-standard-8",
-    },
+    # `vcpu` drives NPROC (MPI ranks). machineType-based presets pin a compute-optimized
+    # family (better QE perf than the e2 Batch auto-picks from cpuMilli) and omit
+    # computeResource (the machine fully defines CPU/RAM).
+    "low": {"vcpu": 4, "cpuMilli": 4000, "memoryMib": 16384, "gpu": None, "machineType": None},
+    "standard": {"vcpu": 8, "cpuMilli": 8000, "memoryMib": 32768, "gpu": None, "machineType": None},
+    # bulk = default for real workloads (≥12 cores, fail-fast): c2d compute-optimized.
+    "bulk": {"vcpu": 16, "cpuMilli": None, "memoryMib": None, "gpu": None, "machineType": "c2d-standard-16"},
+    "bulk-large": {"vcpu": 32, "cpuMilli": None, "memoryMib": None, "gpu": None, "machineType": "c2d-standard-32"},
+    # ⚠ GPU is a knob only: the QE image is CPU-only → GPU sits idle until a CUDA QE build exists.
+    "high-gpu": {"vcpu": 8, "cpuMilli": None, "memoryMib": None, "gpu": "nvidia-l4", "machineType": "g2-standard-8"},
 }
+
+
+def preset_vcpu(machine_preset: str) -> int:
+    """vCPU count of a preset → default NPROC (MPI ranks)."""
+    if machine_preset not in MACHINE_PRESETS:
+        raise ValueError(f"unknown machine preset {machine_preset!r}")
+    return int(MACHINE_PRESETS[machine_preset]["vcpu"])
 
 # Fail (do NOT retry) on hard errors: 1=generic, 137=OOM (SIGKILL), 139=SIGSEGV.
 _FAIL_EXIT_CODES = [1, 137, 139]
@@ -93,18 +104,20 @@ def build_batch_job(
 
     task_spec: dict[str, Any] = {
         "runnables": [runnable],
-        "computeResource": {"cpuMilli": preset["cpuMilli"], "memoryMib": preset["memoryMib"]},
         "maxRunDuration": f"{int(max_run_duration_sec)}s",
         "maxRetryCount": 0,
         "lifecyclePolicies": [
             {"action": "FAIL_TASK", "actionCondition": {"exitCodes": list(_FAIL_EXIT_CODES)}}
         ],
     }
+    if preset["machineType"] is None:  # auto-pick machine from cpu/mem (no explicit machineType)
+        task_spec["computeResource"] = {"cpuMilli": preset["cpuMilli"], "memoryMib": preset["memoryMib"]}
 
     policy: dict[str, Any] = {"provisioningModel": "SPOT" if use_spot else "STANDARD"}
+    if preset["machineType"]:  # pin compute-optimized / GPU family
+        policy["machineType"] = preset["machineType"]
     instance: dict[str, Any] = {"policy": policy}
     if preset["gpu"]:
-        policy["machineType"] = preset["machineType"]
         policy["accelerators"] = [{"type": preset["gpu"], "count": gpu_count}]
         instance["installGpuDrivers"] = True
 

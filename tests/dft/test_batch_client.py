@@ -13,6 +13,7 @@ import pytest
 
 from src.dft.batch_client import (
     MACHINE_PRESETS,
+    preset_vcpu,
     build_batch_job,
     cancel_job,
     get_job_state,
@@ -72,8 +73,11 @@ def test_unknown_preset_raises():
 
 
 def test_presets_table():
-    assert set(MACHINE_PRESETS) == {"low", "standard", "high-gpu"}
+    assert set(MACHINE_PRESETS) == {"low", "standard", "bulk", "bulk-large", "high-gpu"}
     assert MACHINE_PRESETS["high-gpu"]["gpu"] == "nvidia-l4"
+    assert MACHINE_PRESETS["bulk"]["machineType"] == "c2d-standard-16"
+    assert MACHINE_PRESETS["bulk"]["vcpu"] == 16
+    assert all("vcpu" in p for p in MACHINE_PRESETS.values())
 
 
 # ── pure: qe_command ─────────────────────────────────────────────────────────
@@ -109,8 +113,11 @@ def test_manifest_validates_against_batch_proto():
         manifest = build_batch_job(IMAGE, ["pw.x", "-in", "a.in"], machine_preset=preset)
         job = batch_v1.Job()
         json_format.ParseDict(manifest, job._pb)  # raises if any field/enum is wrong
-        assert job.task_groups[0].task_spec.compute_resource.cpu_milli == \
-            MACHINE_PRESETS[preset]["cpuMilli"]
+        cfg = MACHINE_PRESETS[preset]
+        if cfg["machineType"] is None:  # auto-pick → computeResource present
+            assert job.task_groups[0].task_spec.compute_resource.cpu_milli == cfg["cpuMilli"]
+        else:  # pinned machine → machineType on instance policy, no computeResource
+            assert job.allocation_policy.instances[0].policy.machine_type == cfg["machineType"]
 
 
 def test_submit_job_calls_create_with_mock():
@@ -195,3 +202,23 @@ def test_empty_commands_and_sa_validate_against_proto():
     j = batch_v1.Job(); json_format.ParseDict(job, j._pb)
     assert j.allocation_policy.service_account.email == "sa@p.iam.gserviceaccount.com"
 
+
+
+def test_bulk_preset_pins_machine_type_no_compute_resource():
+    m = build_batch_job(IMAGE, [], machine_preset="bulk")
+    ts = m["taskGroups"][0]["taskSpec"]
+    assert "computeResource" not in ts  # machine fully defines CPU/RAM
+    assert m["allocationPolicy"]["instances"][0]["policy"]["machineType"] == "c2d-standard-16"
+
+
+def test_low_preset_uses_compute_resource_no_machine_type():
+    m = build_batch_job(IMAGE, [], machine_preset="low")
+    ts = m["taskGroups"][0]["taskSpec"]
+    assert ts["computeResource"]["cpuMilli"] == 4000
+    assert "machineType" not in m["allocationPolicy"]["instances"][0]["policy"]
+
+
+def test_preset_vcpu_mapping():
+    assert preset_vcpu("bulk") == 16
+    assert preset_vcpu("bulk-large") == 32
+    assert preset_vcpu("low") == 4

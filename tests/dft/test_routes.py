@@ -94,8 +94,8 @@ class _FakeIO:
     def __init__(self):
         self.created = []
 
-    def create_workflow(self, t, w, wf):
-        self.created.append((t, w, wf))
+    def create_workflow(self, t, w, wf, *, machine_preset=None, max_run_sec=None):
+        self.created.append((t, w, wf, machine_preset, max_run_sec))
 
 
 def test_submit_persists_and_launches(monkeypatch):

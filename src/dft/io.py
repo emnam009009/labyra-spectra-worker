@@ -24,7 +24,7 @@ import logging
 import re
 from typing import Any
 
-from src.dft.batch_client import _QE_BINARY, build_batch_job
+from src.dft.batch_client import _QE_BINARY, build_batch_job, preset_vcpu
 from src.dft.errors import FatalError
 from src.dft.generator import generate_postproc_input, generate_pw_input
 
@@ -57,7 +57,8 @@ class FirestoreGcsBatchIO:
         service_account: str | None = None,
         machine_preset: str = "low",
         use_spot: bool = True,
-        nproc: int = 1,
+        nproc: int | None = None,  # None → derive from preset vCPU
+        max_run_sec: int = 3600,
         prefix: str = "pwscf",
         firestore_client: Any | None = None,
         storage_client: Any | None = None,
@@ -73,6 +74,7 @@ class FirestoreGcsBatchIO:
         self.machine_preset = machine_preset
         self.use_spot = use_spot
         self.nproc = nproc
+        self.max_run_sec = max_run_sec
         self.prefix = prefix
         self._fs = firestore_client
         self._gcs = storage_client
@@ -116,7 +118,8 @@ class FirestoreGcsBatchIO:
 
     # ── workflow lifecycle ──
     def create_workflow(
-        self, tenant_id: str, workflow_id: str, workflow: dict[str, Any]
+        self, tenant_id: str, workflow_id: str, workflow: dict[str, Any],
+        *, machine_preset: str | None = None, max_run_sec: int | None = None,
     ) -> None:
         """Persist a new workflow doc (structure/global/units + empty state)."""
         payload: dict[str, Any] = {
@@ -128,6 +131,10 @@ class FirestoreGcsBatchIO:
             "relaxedStructures": "{}",
             "overallStatus": "pending",
         }
+        if machine_preset:  # workflow-level VM preset (per-unit can still override)
+            payload["machinePreset"] = machine_preset
+        if max_run_sec:
+            payload["maxRunSec"] = int(max_run_sec)
         try:
             from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 
@@ -138,6 +145,7 @@ class FirestoreGcsBatchIO:
         self._cache[(tenant_id, workflow_id)] = {
             "units": workflow["units"], "structure": workflow["structure"],
             "global": workflow.get("global", {}), "snapshot": {}, "relaxedStructures": {},
+            "machinePreset": machine_preset, "maxRunSec": max_run_sec,
         }
 
     # ── DftIO protocol ──
@@ -160,6 +168,8 @@ class FirestoreGcsBatchIO:
             "global": d.get("global", {}),
             "snapshot": d.get("snapshot", {}),
             "relaxedStructures": relaxed,
+            "machinePreset": d.get("machinePreset"),
+            "maxRunSec": d.get("maxRunSec"),
         }
         self._cache[(tenant_id, workflow_id)] = doc
         return doc
@@ -176,7 +186,12 @@ class FirestoreGcsBatchIO:
     ) -> str:
         doc = self._cache.get((tenant_id, workflow_id), {})
         units_by_id = {u["id"]: u for u in doc.get("units", [])}
-        params = (units_by_id.get(unit_id, {}) or {}).get("params") or {}
+        unit = units_by_id.get(unit_id, {}) or {}
+        params = unit.get("params") or {}
+        # VM preset: per-unit > workflow > io default. NPROC = explicit override or preset vCPU.
+        preset = unit.get("machinePreset") or doc.get("machinePreset") or self.machine_preset
+        nproc = self.nproc if self.nproc is not None else preset_vcpu(preset)
+        max_run = unit.get("maxRunSec") or doc.get("maxRunSec") or self.max_run_sec
 
         in_text = self._render(calc_type, structure, global_params, params)
         in_name, out_name = f"{calc_type}.in", f"{calc_type}.out"
@@ -190,7 +205,7 @@ class FirestoreGcsBatchIO:
             "QE_OUT": out_name,
             "GCS_WORK": gcs_work,
             "GCS_PSEUDO": f"gs://{self.bucket}/{self.pseudo_prefix}",
-            "NPROC": str(self.nproc),
+            "NPROC": str(nproc),
             "OMP_NUM_THREADS": "1",
         }
         deps = " ".join(f"gs://{self.bucket}/workflows/{workflow_id}/units/{d}" for d in gcs_deps)
@@ -199,7 +214,8 @@ class FirestoreGcsBatchIO:
 
         manifest = build_batch_job(
             self.image_uri, [],
-            machine_preset=self.machine_preset,
+            machine_preset=preset,
+            max_run_duration_sec=int(max_run),
             use_spot=self.use_spot,
             env=env,
             labels={"dft_tenant": tenant_id, "dft_workflow": workflow_id, "dft_unit": unit_id},

@@ -141,3 +141,38 @@ def test_save_json_strings_relaxed_structures():
     payload = doc_ref.set.call_args.args[0]
     assert isinstance(payload["relaxedStructures"], str)
     assert json.loads(payload["relaxedStructures"])["relax"]["ibrav"] == 0
+
+
+def test_launch_uses_workflow_preset_and_nproc():
+    io, _fs, _gcs, submitted, _ = _io()
+    io.create_workflow("t1", "w1", SI_WF, machine_preset="bulk")
+    io.launch("t1", "w1", "scf", "scf", SI_WF["structure"], SI_WF["global"], [])
+    _job, manifest = submitted[0]
+    env = manifest["taskGroups"][0]["taskSpec"]["runnables"][0]["environment"]["variables"]
+    assert env["NPROC"] == "16"  # bulk = c2d-standard-16 → 16 MPI ranks
+    pol = manifest["allocationPolicy"]["instances"][0]["policy"]
+    assert pol["machineType"] == "c2d-standard-16"
+    assert "computeResource" not in manifest["taskGroups"][0]["taskSpec"]
+
+
+def test_per_unit_preset_overrides_workflow():
+    import copy
+    wf = copy.deepcopy(SI_WF)
+    for u in wf["units"]:
+        if u["id"] == "relax":
+            u["machinePreset"] = "bulk-large"  # this unit overrides workflow default
+    io, _fs, _gcs, submitted, _ = _io()
+    io.create_workflow("t1", "w1", wf, machine_preset="bulk")
+    io.launch("t1", "w1", "relax", "vc-relax", wf["structure"], wf["global"], [])
+    _job, manifest = submitted[0]
+    env = manifest["taskGroups"][0]["taskSpec"]["runnables"][0]["environment"]["variables"]
+    assert env["NPROC"] == "32"  # unit override bulk-large
+    assert manifest["allocationPolicy"]["instances"][0]["policy"]["machineType"] == "c2d-standard-32"
+
+
+def test_max_run_sec_workflow_override():
+    io, _fs, _gcs, submitted, _ = _io()
+    io.create_workflow("t1", "w1", SI_WF, max_run_sec=7200)
+    io.launch("t1", "w1", "scf", "scf", SI_WF["structure"], SI_WF["global"], [])
+    _job, manifest = submitted[0]
+    assert manifest["taskGroups"][0]["taskSpec"]["maxRunDuration"] == "7200s"
