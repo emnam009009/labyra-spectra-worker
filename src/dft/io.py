@@ -19,6 +19,7 @@ relaxedStructures, overallStatus}.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any
@@ -118,11 +119,11 @@ class FirestoreGcsBatchIO:
         """Persist a new workflow doc (structure/global/units + empty state)."""
         payload: dict[str, Any] = {
             "schemaVersion": 1,
-            "structure": workflow["structure"],
+            "structure": json.dumps(workflow["structure"]),  # nested arrays → JSON string
             "global": workflow.get("global", {}),
             "units": workflow["units"],
             "snapshot": {},
-            "relaxedStructures": {},
+            "relaxedStructures": "{}",
             "overallStatus": "pending",
         }
         try:
@@ -143,12 +144,20 @@ class FirestoreGcsBatchIO:
         if not getattr(snap, "exists", False):
             raise FatalError(f"workflow not found: {tenant_id}/{workflow_id}")
         d = snap.to_dict() or {}
+        # structure + relaxedStructures are JSON strings in Firestore (nested arrays like
+        # cellParameters aren't valid Firestore entities); decode back to dicts here.
+        structure = d.get("structure", {})
+        if isinstance(structure, str):
+            structure = json.loads(structure) if structure else {}
+        relaxed = d.get("relaxedStructures", {})
+        if isinstance(relaxed, str):
+            relaxed = json.loads(relaxed) if relaxed else {}
         doc = {
             "units": d.get("units", []),
-            "structure": d.get("structure", {}),
+            "structure": structure,
             "global": d.get("global", {}),
             "snapshot": d.get("snapshot", {}),
-            "relaxedStructures": d.get("relaxedStructures", {}),
+            "relaxedStructures": relaxed,
         }
         self._cache[(tenant_id, workflow_id)] = doc
         return doc
@@ -217,7 +226,7 @@ class FirestoreGcsBatchIO:
         payload: dict[str, Any] = {
             "snapshot": snapshot,
             "overallStatus": overall,
-            "relaxedStructures": relaxed_structures,
+            "relaxedStructures": json.dumps(relaxed_structures),  # nested arrays → JSON string
         }
         try:
             from google.cloud.firestore_v1 import SERVER_TIMESTAMP

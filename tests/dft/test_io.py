@@ -108,3 +108,36 @@ def test_save_writes_merge():
     payload = doc_ref.set.call_args.args[0]
     assert payload["overallStatus"] == "running"
     assert payload["snapshot"]["relax"]["status"] == "completed"
+
+
+def test_create_workflow_json_strings_structure():
+    io, _fs, _gcs, _s, doc_ref = _io()
+    io.create_workflow("t1", "w1", SI_WF)
+    payload = doc_ref.set.call_args.args[0]
+    assert isinstance(payload["structure"], str)  # nested-array-safe for Firestore
+    assert json.loads(payload["structure"])["ibrav"] == 0
+    assert payload["relaxedStructures"] == "{}"
+    assert payload["units"] == SI_WF["units"]  # units stay native (arrays of maps OK)
+
+
+def test_load_decodes_json_string_structure():
+    enc = {
+        "units": SI_WF["units"],
+        "structure": json.dumps(SI_WF["structure"]),
+        "global": SI_WF["global"],
+        "snapshot": {"relax": {"status": "completed"}},
+        "relaxedStructures": json.dumps({"relax": {"ibrav": 0, "cellParameters": [[1, 0, 0]]}}),
+    }
+    io, *_ = _io(to_dict=enc)
+    doc = io.load("t1", "w1")
+    assert doc["structure"]["ibrav"] == 0  # decoded back to dict
+    assert doc["relaxedStructures"]["relax"]["cellParameters"] == [[1, 0, 0]]
+
+
+def test_save_json_strings_relaxed_structures():
+    io, _fs, _gcs, _s, doc_ref = _io()
+    io.save("t1", "w1", {"relax": {"status": "completed"}}, "running",
+            {"relax": {"ibrav": 0, "cellParameters": [[0, 2.7, 2.7]]}})
+    payload = doc_ref.set.call_args.args[0]
+    assert isinstance(payload["relaxedStructures"], str)
+    assert json.loads(payload["relaxedStructures"])["relax"]["ibrav"] == 0
