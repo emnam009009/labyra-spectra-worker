@@ -147,3 +147,27 @@ def test_postproc_charge_no_sample_bias_when_not_5():
 def test_postproc_unsupported_raises():
     with pytest.raises(ValueError, match="unsupported post-processing"):
         generate_postproc_input("scf", prefix="x")  # scf is pw.x, not post-proc
+
+
+def test_occupations_omitted_when_absent():
+    """bands has no occupations → must NOT render `occupations = ''` (QE: set_occupations error)."""
+    # bands: no occupations key
+    bands = generate_pw_input(
+        _s(),
+        {"calculation": "bands", "convThr": 1e-8,
+         "kPoints": {"type": "crystal_b", "path": [
+             {"coords": [0, 0, 0], "label": "G", "npoints": 20},
+             {"coords": [0.5, 0, 0.5], "label": "X", "npoints": 1}]}},
+        prefix="Si", ecutwfc=40, ecutrho=160,
+    )
+    assert "occupations" not in bands
+    assert "occupations = ''" not in bands  # the exact bug
+    # scf with smearing: occupations + smearing + degauss all present
+    scf = generate_pw_input(
+        _s(),
+        {"calculation": "scf", "occupations": "smearing", "degauss": 0.01, "convThr": 1e-9,
+         "kPoints": {"type": "automatic", "grid": [6, 6, 6], "shift": [0, 0, 0]}},
+        prefix="Si", ecutwfc=40, ecutrho=160,
+    )
+    assert "occupations = 'smearing'" in scf
+    assert "degauss" in scf

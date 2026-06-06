@@ -30,10 +30,12 @@
     ecutrho     = {{ wf.ecutrho }},
     input_dft   = '{{ wf.functional }}',
     nspin       = 1,
+{%- if p.occupations %}
     occupations = '{{ p.occupations }}',
 {%- if p.occupations == 'smearing' %}
     smearing    = '{{ p.smearing | default("gaussian") }}',
     degauss     = {{ p.degauss | default(0.007) }},
+{%- endif %}
 {%- endif %}
     nosym       = .false.,
     noncolin    = .false.,

@@ -31,9 +31,10 @@ RUN cmake -DCMAKE_C_COMPILER=mpicc -DCMAKE_CXX_COMPILER=mpicxx \
 # ---------- runtime stage (smaller) ----------
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
-# QE runtime libs + gsutil (google-cloud-cli) for input/output staging.
+# QE runtime libs + gsutil/gcloud (google-cloud-cli, needs python3) for GCS staging.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl gnupg \
+        python3 python3-crcmod \
         openmpi-bin libfftw3-double3 libfftw3-single3 libblas3 liblapack3 libgfortran5 libgomp1 \
     && echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
          > /etc/apt/sources.list.d/google-cloud-sdk.list \
