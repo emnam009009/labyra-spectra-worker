@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 1,
+  "structure": {
+    "ibrav": 0,
+    "celldm": {},
+    "cellParameters": [
+      [
+        0.0,
+        2.715,
+        2.715
+      ],
+      [
+        2.715,
+        0.0,
+        2.715
+      ],
+      [
+        2.715,
+        2.715,
+        0.0
+      ]
+    ],
+    "nat": 2,
+    "ntyp": 1,
+    "atomicSpecies": [
+      {
+        "element": "Si",
+        "mass": 28.0855,
+        "pseudoFile": "Si_ONCV_PBE-1.1.upf"
+      }
+    ],
+    "atomicPositions": [
+      {
+        "element": "Si",
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      {
+        "element": "Si",
+        "x": 0.25,
+        "y": 0.25,
+        "z": 0.25
+      }
+    ],
+    "positionsType": "crystal"
+  },
+  "global": {
+    "ecutwfc": 40,
+    "ecutrho": 160,
+    "functional": "pbe"
+  },
+  "units": [
+    {
+      "id": "relax",
+      "calcType": "vc-relax",
+      "dependsOn": [],
+      "params": {
+        "calculation": "vc-relax",
+        "kPoints": {
+          "type": "automatic",
+          "grid": [
+            6,
+            6,
+            6
+          ],
+          "shift": [
+            1,
+            1,
+            1
+          ]
+        },
+        "occupations": "smearing",
+        "degauss": 0.01,
+        "convThr": 1e-08
+      }
+    },
+    {
+      "id": "scf",
+      "calcType": "scf",
+      "dependsOn": [
+        "relax"
+      ],
+      "params": {
+        "calculation": "scf",
+        "kPoints": {
+          "type": "automatic",
+          "grid": [
+            8,
+            8,
+            8
+          ],
+          "shift": [
+            1,
+            1,
+            1
+          ]
+        },
+        "occupations": "smearing",
+        "degauss": 0.01,
+        "convThr": 1e-08
+      }
+    },
+    {
+      "id": "bands",
+      "calcType": "bands",
+      "dependsOn": [
+        "scf"
+      ],
+      "params": {
+        "calculation": "bands",
+        "kPoints": {
+          "type": "crystal_b",
+          "path": [
+            {
+              "coords": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "label": "G",
+              "npoints": 20
+            },
+            {
+              "coords": [
+                0.5,
+                0.0,
+                0.5
+              ],
+              "label": "X",
+              "npoints": 20
+            },
+            {
+              "coords": [
+                0.5,
+                0.25,
+                0.75
+              ],
+              "label": "W",
+              "npoints": 1
+            }
+          ]
+        },
+        "convThr": 1e-08
+      }
+    }
+  ]
+}
