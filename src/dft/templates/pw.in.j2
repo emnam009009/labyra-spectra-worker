@@ -48,6 +48,7 @@
     diago_david_ndim = {{ p.diagoDavidNdim | default(8) }},
     mixing_ndim      = 20,
     mixing_mode      = 'plain',
+    diago_full_acc   = {{ p.diagoFullAcc | default(false) | qe_bool }},
 {%- if p.electronMaxstep %}
     electron_maxstep = {{ p.electronMaxstep }},
 {%- endif %}

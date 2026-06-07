@@ -272,15 +272,16 @@ class FirestoreGcsBatchIO:
         self, calc: str, structure: dict[str, Any], g: dict[str, Any], params: dict[str, Any]
     ) -> str:
         functional = g.get("functional", "pbe")
+        prefix = g.get("prefix") or self.prefix  # workflow-level prefix (e.g. "h-WO3_bulk")
         if calc in _POSTPROC:
             return generate_postproc_input(
-                calc, params, prefix=self.prefix, functional=functional,
+                calc, params, prefix=prefix, functional=functional,
                 outdir=_STAGED_OUTDIR, name=params.get("name"),
             )
         ecutwfc = float(g.get("ecutwfc", 50.0))
         ecutrho = float(g.get("ecutrho", ecutwfc * 4.0))
         return generate_pw_input(
-            structure, params, prefix=self.prefix, ecutwfc=ecutwfc, ecutrho=ecutrho,
+            structure, params, prefix=prefix, ecutwfc=ecutwfc, ecutrho=ecutrho,
             functional=functional, hubbard=g.get("hubbard"), outdir=_STAGED_OUTDIR,
         )
 
