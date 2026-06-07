@@ -36,8 +36,11 @@ MACHINE_PRESETS: dict[str, dict[str, Any]] = {
     # computeResource (the machine fully defines CPU/RAM).
     "low": {"vcpu": 4, "cpuMilli": 4000, "memoryMib": 16384, "gpu": None, "machineType": None},
     "standard": {"vcpu": 8, "cpuMilli": 8000, "memoryMib": 32768, "gpu": None, "machineType": None},
-    # bulk = default for real workloads (≥12 cores, fail-fast): c2d compute-optimized.
-    "bulk": {"vcpu": 16, "cpuMilli": None, "memoryMib": None, "gpu": None, "machineType": "c2d-standard-16"},
+    # bulk = default for real workloads: c2-standard-60 (Intel Cascade Lake, AVX-512, 30
+    # physical cores → np=30, 2×3×5 factors cleanly for npool). 120GB... actually 240GB RAM.
+    "bulk": {"vcpu": 60, "cpuMilli": None, "memoryMib": None, "gpu": None, "machineType": "c2-standard-60"},
+    # fallback if c2 capacity-constrained in the zone (c2 is older-gen; on-demand may stall).
+    "bulk-amd": {"vcpu": 16, "cpuMilli": None, "memoryMib": None, "gpu": None, "machineType": "c2d-standard-16"},
     "bulk-large": {"vcpu": 32, "cpuMilli": None, "memoryMib": None, "gpu": None, "machineType": "c2d-standard-32"},
     # ⚠ GPU is a knob only: the QE image is CPU-only → GPU sits idle until a CUDA QE build exists.
     "high-gpu": {"vcpu": 8, "cpuMilli": None, "memoryMib": None, "gpu": "nvidia-l4", "machineType": "g2-standard-8"},

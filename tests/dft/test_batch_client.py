@@ -73,10 +73,10 @@ def test_unknown_preset_raises():
 
 
 def test_presets_table():
-    assert set(MACHINE_PRESETS) == {"low", "standard", "bulk", "bulk-large", "high-gpu"}
+    assert set(MACHINE_PRESETS) == {"low", "standard", "bulk", "bulk-amd", "bulk-large", "high-gpu"}
     assert MACHINE_PRESETS["high-gpu"]["gpu"] == "nvidia-l4"
-    assert MACHINE_PRESETS["bulk"]["machineType"] == "c2d-standard-16"
-    assert MACHINE_PRESETS["bulk"]["vcpu"] == 16
+    assert MACHINE_PRESETS["bulk"]["machineType"] == "c2-standard-60"
+    assert MACHINE_PRESETS["bulk"]["vcpu"] == 60
     assert all("vcpu" in p for p in MACHINE_PRESETS.values())
 
 
@@ -208,7 +208,7 @@ def test_bulk_preset_pins_machine_type_no_compute_resource():
     m = build_batch_job(IMAGE, [], machine_preset="bulk")
     ts = m["taskGroups"][0]["taskSpec"]
     assert "computeResource" not in ts  # machine fully defines CPU/RAM
-    assert m["allocationPolicy"]["instances"][0]["policy"]["machineType"] == "c2d-standard-16"
+    assert m["allocationPolicy"]["instances"][0]["policy"]["machineType"] == "c2-standard-60"
 
 
 def test_low_preset_uses_compute_resource_no_machine_type():
@@ -219,6 +219,6 @@ def test_low_preset_uses_compute_resource_no_machine_type():
 
 
 def test_preset_vcpu_mapping():
-    assert preset_vcpu("bulk") == 16
+    assert preset_vcpu("bulk") == 60
     assert preset_vcpu("bulk-large") == 32
     assert preset_vcpu("low") == 4

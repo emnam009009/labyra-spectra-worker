@@ -149,9 +149,9 @@ def test_launch_uses_workflow_preset_and_nproc():
     io.launch("t1", "w1", "scf", "scf", SI_WF["structure"], SI_WF["global"], [])
     _job, manifest = submitted[0]
     env = manifest["taskGroups"][0]["taskSpec"]["runnables"][0]["environment"]["variables"]
-    assert env["NPROC"] == "8"  # bulk c2d-standard-16 → 8 physical cores (16 vCPU / 2)
+    assert env["NPROC"] == "30"  # bulk c2-standard-60 → 30 physical cores (60 vCPU / 2)
     pol = manifest["allocationPolicy"]["instances"][0]["policy"]
-    assert pol["machineType"] == "c2d-standard-16"
+    assert pol["machineType"] == "c2-standard-60"
     assert "computeResource" not in manifest["taskGroups"][0]["taskSpec"]
 
 
