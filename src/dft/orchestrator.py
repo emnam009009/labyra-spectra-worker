@@ -17,11 +17,12 @@ Status vocabulary matches the app's DftUnitStatus:
 """
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from src.dft.qe_parser import parse_final_structure
+from src.dft.qe_parser import BOHR_TO_ANG, parse_final_structure
 
 # DftUnitStatus (matches src/types/dft.ts)
 PENDING = "pending"
@@ -207,9 +208,7 @@ def relaxed_structure_from_out(
     fs = parse_final_structure(out_text)
     if fs is None or not fs["cell_ang"] or not fs["species"]:
         return None
-    return {
-        "ibrav": 0,
-        "cellParameters": fs["cell_ang"],
+    common = {
         "nat": fs["n_atoms"],
         "ntyp": len(set(fs["species"])),
         "atomicSpecies": base_structure.get("atomicSpecies", []),
@@ -218,4 +217,27 @@ def relaxed_structure_from_out(
             for sp, p in zip(fs["species"], fs["frac_positions"])
         ],
         "positionsType": "crystal",
+    }
+    # Preserve hexagonal ibrav=4 from the base structure: vc-relax with symmetry on keeps
+    # the cell hexagonal (|a1|=|a2|, γ=120°), so recompute celldm from the relaxed vectors
+    # (a=|a1|, c=|a3|). Matches the standard ibrav=4 convention for downstream scf/nscf/bands.
+    try:
+        base_ibrav = int(base_structure.get("ibrav", 0))
+    except (TypeError, ValueError):
+        base_ibrav = 0
+    if base_ibrav == 4:
+        cell = fs["cell_ang"]
+        a_ang = math.sqrt(sum(v * v for v in cell[0]))
+        c_ang = math.sqrt(sum(v * v for v in cell[2]))
+        return {
+            "ibrav": 4,
+            "celldm": {1: a_ang / BOHR_TO_ANG, 3: c_ang / a_ang},
+            "cellParameters": None,
+            **common,
+        }
+    # Default: explicit relaxed cell vectors (ibrav=0).
+    return {
+        "ibrav": 0,
+        "cellParameters": fs["cell_ang"],
+        **common,
     }

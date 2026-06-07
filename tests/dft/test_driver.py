@@ -74,7 +74,8 @@ def test_relax_success_handoff_then_launch_scf():
     # scf launched, with relaxed structure (ibrav=0 from handoff) + NO outdir deps
     assert [u for (u, _c, _d) in io.launched] == ["scf"]
     assert io.launched[0][2] == []                    # relax dep is structure-handoff, not outdir
-    assert io.launch_structures["scf"]["ibrav"] == 0  # relaxed structure used, not base ibrav=4
+    assert io.launch_structures["scf"]["ibrav"] == 4  # relaxed structure preserves base hexagonal ibrav=4
+    assert "celldm" in io.launch_structures["scf"]    # celldm recomputed from relaxed cell
     assert "relax" in io._doc["relaxedStructures"]
     assert overall == "running"
 
@@ -89,8 +90,8 @@ def test_scf_success_launches_branch_with_outdir_dep():
     launched = sorted((u, tuple(d)) for (u, _c, d) in io.launched)
     assert launched == [("bands", ("scf",)), ("dos", ("scf",))]        # restart from scf outdir
     # both inherit the relaxed structure (relax is transitive ancestor)
-    assert io.launch_structures["bands"]["ibrav"] == 0
-    assert io.launch_structures["dos"]["ibrav"] == 0
+    assert io.launch_structures["bands"]["ibrav"] == 4
+    assert io.launch_structures["dos"]["ibrav"] == 4
 
 
 def test_relax_failure_propagates_no_launch():
