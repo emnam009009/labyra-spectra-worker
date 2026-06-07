@@ -171,3 +171,34 @@ def test_occupations_omitted_when_absent():
     )
     assert "occupations = 'smearing'" in scf
     assert "degauss" in scf
+
+
+def test_vdw_d3_emitted_when_param_set():
+    """vdW D3 (grimme-d3) for layered materials like 2H-WS2: emit vdw_corr +
+    dftd3_version + dftd3_threebody only when params present; absent otherwise."""
+    struct = {
+        "ibrav": 4, "celldm": {1: 6.0296188, 3: 4.4511446}, "nat": 6, "ntyp": 2,
+        "atomicSpecies": [
+            {"element": "W", "mass": 183.84, "pseudoFile": "W.upf"},
+            {"element": "S", "mass": 32.06, "pseudoFile": "S.upf"},
+        ],
+        "atomicPositions": [{"element": "W", "x": 0.0, "y": 0.0, "z": 0.0}],
+        "positionsType": "crystal",
+    }
+    params = {
+        "calculation": "scf", "occupations": "fixed", "convThr": 1e-9,
+        "vdwCorr": "grimme-d3", "dftd3Version": 3, "dftd3Threebody": True,
+        "kPoints": {"type": "automatic", "grid": [15, 15, 4], "shift": [0, 0, 0]},
+    }
+    out = generate_pw_input(struct, params, prefix="2H-WS2_bulk",
+                            ecutwfc=60.0, ecutrho=720.0, functional="pbe",
+                            hubbard=[{"manifold": "W-5d", "value": 6.2}], outdir="./out")
+    assert "vdw_corr    = 'grimme-d3'" in out
+    assert "dftd3_version = 3" in out
+    assert "dftd3_threebody = .true." in out
+
+    # without vdW params → no vdw_corr line
+    params_no_vdw = {k: v for k, v in params.items() if not k.startswith(("vdw", "dftd3"))}
+    out2 = generate_pw_input(struct, params_no_vdw, prefix="x", ecutwfc=60.0,
+                             ecutrho=720.0, functional="pbe", hubbard=None, outdir="./out")
+    assert "vdw_corr" not in out2

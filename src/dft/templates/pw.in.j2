@@ -40,6 +40,15 @@
     nosym       = .false.,
     noncolin    = .false.,
     lspinorb    = .false.,
+{%- if p.vdwCorr %}
+    vdw_corr    = '{{ p.vdwCorr }}',
+{%- if p.dftd3Version %}
+    dftd3_version = {{ p.dftd3Version }},
+{%- endif %}
+{%- if p.dftd3Threebody is defined and p.dftd3Threebody is not none %}
+    dftd3_threebody = {{ p.dftd3Threebody | qe_bool }},
+{%- endif %}
+{%- endif %}
 /
 &ELECTRONS
     conv_thr         = {{ p.convThr | qe_sci }},
