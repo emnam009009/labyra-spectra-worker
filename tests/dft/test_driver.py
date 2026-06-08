@@ -48,10 +48,11 @@ class FakeIO:
     def fetch_output(self, t, w, uid):
         return self._out_map[uid]
 
-    def save(self, t, w, snapshot, overall, relaxed):
+    def save(self, t, w, snapshot, overall, relaxed, results=None):
         self.saves += 1
         self._doc["snapshot"] = snapshot
         self._doc["relaxedStructures"] = relaxed
+        self.results = results
 
 
 BASE = {"ibrav": 4, "atomicSpecies": [{"element": "W"}, {"element": "O"}]}

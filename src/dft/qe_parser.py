@@ -4,6 +4,7 @@ Viết riêng cho QE 7.4.x, test trên file thật h-WO3 bulk.
 Phạm vi: structure handoff (relax→scf), convergence (monitoring), scf summary, bands.
 KHÔNG dùng cho dos.x/projwfc.x output (format khác — parser riêng).
 """
+import math
 import re
 
 BOHR_TO_ANG = 0.529177210903
@@ -97,7 +98,11 @@ def parse_final_structure(text):
     vol = re.search(r"new unit-cell volume\s+=\s+[\d.]+ a\.u\.\^3 \(\s+([\d.]+) Ang", block)
     volume_ang = float(vol.group(1)) if vol else None
 
-    cm = re.search(r"CELL_PARAMETERS \(alat=\s*([\d.]+)\)\s*\n(.*?)\n\s*\n", block, re.S)
+    cm = re.search(
+        r"CELL_PARAMETERS \(alat=\s*([\d.]+)\)\s*\n"
+        r"((?:\s*-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+\s*\n){3})",
+        block,
+    )
     cell_ang = None
     alat_bohr = None
     if cm:
@@ -180,15 +185,108 @@ def band_gap_from_eigenvalues(bands_result, n_electrons, spin_polarized=False):
     Insulator không spin: n_occupied = n_electrons / 2.
     VBM = max(occupied) qua mọi k; CBM = min(unoccupied) qua mọi k."""
     ev = bands_result["eigenvalues"]
+    kpts = bands_result.get("kpoints") or [None] * len(ev)
     if not ev or not n_electrons:
         return None
     n_occ = int(round(n_electrons / (1 if spin_polarized else 2)))
     if any(len(e) <= n_occ for e in ev):
         return None
-    vbm = max(e[n_occ - 1] for e in ev)
-    cbm = min(e[n_occ] for e in ev)
+    vbm_i = max(range(len(ev)), key=lambda i: ev[i][n_occ - 1])
+    cbm_i = min(range(len(ev)), key=lambda i: ev[i][n_occ])
+    vbm, cbm = ev[vbm_i][n_occ - 1], ev[cbm_i][n_occ]
+    vbm_k, cbm_k = kpts[vbm_i], kpts[cbm_i]
+    direct = None
+    if vbm_k is not None and cbm_k is not None:
+        direct = all(abs(a - b) < 1e-4 for a, b in zip(vbm_k, cbm_k))
     return {
         "vbm_ev": round(vbm, 4), "cbm_ev": round(cbm, 4),
         "band_gap_ev": round(cbm - vbm, 4),
-        "direct": None,  # có thể mở rộng: so VBM/CBM cùng k
+        "vbm_k": [round(x, 5) for x in vbm_k] if vbm_k else None,
+        "cbm_k": [round(x, 5) for x in cbm_k] if cbm_k else None,
+        "direct": direct,
     }
+
+
+def parse_dos(text):
+    """Parse QE dos.x fildos output: cột E(eV), dos(E), integrated dos(E).
+    Trả energies/dos/integrated + EFermi (nếu có trong header) + dos tại Fermi."""
+    fermi = None
+    m = re.search(r"EFermi\s*=\s*(-?\d+\.\d+)", text)
+    if m:
+        fermi = float(m.group(1))
+    energies, dos, idos = [], [], []
+    for line in text.split("\n"):
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        vals = _floats(s)
+        if vals and len(vals) >= 2:
+            energies.append(vals[0])
+            dos.append(vals[1])
+            if len(vals) >= 3:
+                idos.append(vals[2])
+    dos_at_fermi = None
+    if fermi is not None and energies:
+        ix = min(range(len(energies)), key=lambda i: abs(energies[i] - fermi))
+        dos_at_fermi = round(dos[ix], 6)
+    return {
+        "fermi_ev": fermi,
+        "energies_ev": energies,
+        "dos": dos,
+        "integrated_dos": idos or None,
+        "dos_at_fermi": dos_at_fermi,
+        "n_points": len(energies),
+    }
+
+
+def summarize_results(outputs):
+    """Tổng hợp kết quả khoa học có cấu trúc từ text .out các unit (input → usable results).
+    outputs: dict {role: out_text} với role ∈ {vc-relax|relax, scf|nscf, bands, dos}.
+    Trả: relaxedStructure (a/c/V/density), totalEnergyRy, fermiEv, nElectrons,
+         scfGap (HOMO/LUMO trên lưới scf), bandGap (VBM/CBM/k/direct từ bands k-path)."""
+    res: dict = {}
+
+    relax_txt = outputs.get("vc-relax") or outputs.get("relax")
+    if relax_txt:
+        fs = parse_final_structure(relax_txt)
+        if fs and fs.get("cell_ang"):
+            cell = fs["cell_ang"]
+            a = math.sqrt(sum(v * v for v in cell[0]))
+            c = math.sqrt(sum(v * v for v in cell[2]))
+            res["relaxedStructure"] = {
+                "aAng": round(a, 4),
+                "cAng": round(c, 4),
+                "coa": round(c / a, 4) if a else None,
+                "volumeAng3": fs.get("volume_ang3"),
+                "nAtoms": fs.get("n_atoms"),
+            }
+
+    sc_txt = outputs.get("scf") or outputs.get("nscf")
+    n_elec = None
+    if sc_txt:
+        summ = parse_scf_summary(sc_txt)
+        res["totalEnergyRy"] = summ.get("total_energy_ry")
+        res["fermiEv"] = summ.get("fermi_ev")
+        n_elec = summ.get("n_electrons")
+        if n_elec:
+            res["nElectrons"] = n_elec
+        if summ.get("band_gap_ev") is not None:
+            res["scfGap"] = {
+                "gapEv": summ["band_gap_ev"],
+                "homoEv": summ.get("homo_ev"),
+                "lumoEv": summ.get("lumo_ev"),
+            }
+
+    bands_txt = outputs.get("bands")
+    if bands_txt and n_elec:
+        bg = band_gap_from_eigenvalues(parse_bands(bands_txt), n_elec)
+        if bg:
+            res["bandGap"] = bg
+
+    dos_txt = outputs.get("dos")
+    if dos_txt:
+        d = parse_dos(dos_txt)
+        if d.get("dos_at_fermi") is not None:
+            res["dosAtFermi"] = d["dos_at_fermi"]
+
+    return res

@@ -253,12 +253,15 @@ class FirestoreGcsBatchIO:
         snapshot: dict[str, Any],
         overall: str,
         relaxed_structures: dict[str, Any],
+        results: dict[str, Any] | None = None,
     ) -> None:
         payload: dict[str, Any] = {
             "snapshot": snapshot,
             "overallStatus": overall,
             "relaxedStructures": json.dumps(relaxed_structures),  # nested arrays → JSON string
         }
+        if results is not None:
+            payload["results"] = results  # flat scalars + k-lists → Firestore map OK
         try:
             from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 

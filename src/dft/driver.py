@@ -26,6 +26,7 @@ import logging
 from typing import Any, Protocol
 
 from src.dft.orchestrator import WorkflowState, is_relax, relaxed_structure_from_out
+from src.dft.qe_parser import summarize_results
 
 logger = logging.getLogger(__name__)
 
@@ -98,9 +99,37 @@ def advance(
         logger.info("dft.advance launched unit=%s calc=%s job=%s deps=%s", uid, calc, job, gcs_deps)
 
     overall = ws.overall_status()
-    io.save(tenant_id, workflow_id, ws.snapshot(), overall, relaxed)
+    results = None
+    if overall == "completed":
+        try:
+            results = _summarize_completed(io, ws, tenant_id, workflow_id)
+            logger.info(
+                "dft.advance results workflow=%s gap=%s",
+                workflow_id, (results or {}).get("bandGap"),
+            )
+        except Exception as exc:  # noqa: BLE001 — results extraction must not break the DAG
+            logger.warning("dft.advance summarize failed workflow=%s: %s", workflow_id, exc)
+    io.save(tenant_id, workflow_id, ws.snapshot(), overall, relaxed, results)
     logger.info("dft.advance workflow=%s overall=%s", workflow_id, overall)
     return overall
+
+
+def _summarize_completed(
+    io: DftIO,
+    ws: WorkflowState,
+    tenant_id: str,
+    workflow_id: str,
+) -> dict[str, Any]:
+    """On completion: fetch key unit .out files by calc type → structured scientific results."""
+    by_calc: dict[str, str] = {}
+    for uid in ws.snapshot():
+        ct = (ws.calc_type(uid) or "").lower()
+        if ct in ("vc-relax", "relax", "scf", "nscf", "bands"):
+            try:
+                by_calc[ct] = io.fetch_output(tenant_id, workflow_id, uid)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("dft.summarize fetch failed unit=%s: %s", uid, exc)
+    return summarize_results(by_calc)
 
 
 def _apply_event(
