@@ -175,6 +175,8 @@ class FirestoreGcsBatchIO:
             "relaxedStructures": relaxed,
             "machinePreset": d.get("machinePreset"),
             "maxRunSec": d.get("maxRunSec"),
+            "overallStatus": d.get("overallStatus"),
+            "results": d.get("results"),
         }
         self._cache[(tenant_id, workflow_id)] = doc
         return doc
