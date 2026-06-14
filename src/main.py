@@ -633,3 +633,56 @@ async def csie_process(request: Request) -> dict:
 from src.dft.routes import router as dft_router  # noqa: E402
 
 app.include_router(dft_router)
+
+
+_DFT_POSTPROC = {"ppbands", "dos", "pdos", "charge"}
+
+
+@app.post("/dft/preview")
+async def dft_preview(request: Request) -> dict[str, str]:
+    """Render the QE .in for one unit from current params — no save, no run.
+
+    Body: {calcType, structure, global, params}. Returns {"input": "<.in text>"}.
+    Lets the UI double-check the exact input before launching (a 1-char QE error
+    fails the whole job). Mirrors FirestoreGcsBatchIO._render.
+    """
+    from src.dft.generator import generate_postproc_input, generate_pw_input
+
+    body = await request.json()
+    calc = body.get("calcType") or body.get("calc")
+    if not isinstance(calc, str):
+        raise HTTPException(status_code=422, detail="calcType required")
+    structure = body.get("structure") or {}
+    g = body.get("global") or {}
+    params = body.get("params") or {}
+    _kp = params.get("kPoints")
+    if isinstance(_kp, dict) and "shift" not in _kp:
+        _kp["shift"] = [0, 0, 0]
+    prefix = g.get("prefix") or "preview"
+    functional = g.get("functional", "pbe")
+    try:
+        if calc in _DFT_POSTPROC:
+            text = generate_postproc_input(
+                calc,
+                params,
+                prefix=prefix,
+                functional=functional,
+                outdir="./out",
+                name=params.get("name"),
+            )
+        else:
+            ecutwfc = float(g.get("ecutwfc", 50.0))
+            ecutrho = float(g.get("ecutrho", ecutwfc * 4.0))
+            text = generate_pw_input(
+                structure,
+                params,
+                prefix=prefix,
+                ecutwfc=ecutwfc,
+                ecutrho=ecutrho,
+                functional=functional,
+                hubbard=g.get("hubbard"),
+                outdir="./out",
+            )
+    except Exception as exc:  # preview is read-only — surface any render error as 422
+        raise HTTPException(status_code=422, detail=f"render failed: {exc}") from exc
+    return {"input": text}
