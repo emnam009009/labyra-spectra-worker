@@ -209,11 +209,6 @@ async def advance_workflow(request: Request) -> None:
 
 
 # ── R272w-bands: band-structure plot data (on-demand, reads GCS .out) ──────────
-class BandsRequest(BaseModel):
-    tenantId: str
-    workflowId: str
-
-
 _GREEK_LABEL = {"GAMMA": "Γ", "DELTA": "Δ", "SIGMA": "Σ", "LAMBDA": "Λ"}
 
 
@@ -230,7 +225,7 @@ def _pmg_from_doc(struct: dict[str, Any]) -> Any:
         cd = {int(k): v for k, v in (struct.get("celldm") or {}).items()}
         cell = _cell_from_ibrav(int(struct.get("ibrav", 0)), cd)
         if cell is None:
-            raise ValueError("cannot build cell: ibrav not in whitelist and no cellParameters")
+            raise ValueError("cannot build cell: ibrav not whitelisted and no cellParameters")
         latt = Lattice(cell)
     pos = struct.get("atomicPositions") or []
     species = [p["element"] for p in pos]
@@ -239,10 +234,10 @@ def _pmg_from_doc(struct: dict[str, Any]) -> Any:
 
 
 @router.post("/bands")
-def bands_plot(req: BandsRequest) -> dict[str, Any]:
+async def bands_plot(request: Request) -> dict[str, Any]:
     """Band-structure plot data for a completed workflow. No re-run.
 
-    kdist = cumulative |Δk| (QE prints k in cartesian 2π/alat, so plain Euclidean);
+    kdist = cumulative |Δk| (QE prints k in cartesian 2π/alat → plain Euclidean);
     bands = per-band E−E_F over k; ticks = high-symmetry labels; plus Fermi + gap.
     """
     import math
@@ -253,8 +248,14 @@ def bands_plot(req: BandsRequest) -> dict[str, Any]:
         parse_scf_summary,
     )
 
+    body = await request.json()
+    tenant_id = body.get("tenantId")
+    workflow_id = body.get("workflowId")
+    if not tenant_id or not workflow_id:
+        raise HTTPException(status_code=422, detail="tenantId and workflowId required")
+
     io = _dft_io()
-    doc = io.load(req.tenantId, req.workflowId)
+    doc = io.load(tenant_id, workflow_id)
     units = doc.get("units") or []
     by_calc = {u.get("calcType"): u for u in units}
     bands_u = by_calc.get("bands")
@@ -262,7 +263,7 @@ def bands_plot(req: BandsRequest) -> dict[str, Any]:
     if not bands_u:
         raise HTTPException(status_code=404, detail="workflow has no 'bands' unit")
 
-    bands_out = io.fetch_output(req.tenantId, req.workflowId, bands_u["id"])
+    bands_out = io.fetch_output(tenant_id, workflow_id, bands_u["id"])
     bres = parse_bands(bands_out)
     kp = bres.get("kpoints") or []
     ev = bres.get("eigenvalues") or []
@@ -273,7 +274,7 @@ def bands_plot(req: BandsRequest) -> dict[str, Any]:
     n_elec = None
     if scf_u:
         try:
-            scf_out = io.fetch_output(req.tenantId, req.workflowId, scf_u["id"])
+            scf_out = io.fetch_output(tenant_id, workflow_id, scf_u["id"])
             summ = parse_scf_summary(scf_out)
             fermi = summ.get("fermi_ev")
             n_elec = summ.get("n_electrons")
@@ -307,7 +308,7 @@ def bands_plot(req: BandsRequest) -> dict[str, Any]:
                 else:
                     ticks.append({"dist": kdist[idx], "label": label})
             idx += int(entry.get("npoints", 1))
-    except Exception:  # noqa: BLE001 — labels are best-effort; bands still render
+    except Exception:  # noqa: BLE001 — labels best-effort; bands still render
         ticks = []
 
     gap = None
