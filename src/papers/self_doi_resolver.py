@@ -62,6 +62,15 @@ _LABELLED_DOI_RE = re.compile(
 
 _TRAILING_PUNCT_RE = re.compile(r"[.,;)\]\s]+$")
 
+# R282b: a DOI printed right after a Supporting-Information phrase is the SI's
+# DOI ("Electronic Supplementary Information (ESI) available. See DOI: ..."),
+# not the paper's. Used to skip such candidates in extract_self_doi.
+_SI_CONTEXT_RE = re.compile(
+    r"(electronic\s+)?suppl(?:ementary|emental)\s+(?:information|material|data)"
+    r"|supporting\s+information|\bESI\b",
+    re.IGNORECASE,
+)
+
 
 class SelfDoiResult(BaseModel):
     """Outcome of self-DOI extraction. found=False = leave DOI to other steps."""
@@ -106,6 +115,12 @@ def extract_self_doi(pages_text: list[str]) -> SelfDoiResult:
     for idx, m in enumerate(_LABELLED_DOI_RE.finditer(head)):
         doi = _normalize_doi(m.group(1) or m.group(2) or "")
         if not doi or not _DOI_VALIDATE_RE.match(doi):
+            continue
+        # R282b: drop a DOI sitting in a Supporting-Information context (the SI's
+        # own DOI). Tight 50-char lookback catches "ESI available. See DOI:" but
+        # not the paper's footer DOI ("..., Vol, Page | DOI:").
+        ctx = head[max(0, m.start() - 50) : m.start() + 10]
+        if _SI_CONTEXT_RE.search(ctx):
             continue
         key = doi.lower()
         counts[key] = counts.get(key, 0) + 1
