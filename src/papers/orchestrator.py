@@ -59,6 +59,35 @@ def _log_event(event: str, **fields: Any) -> None:
     logger.info("%s %s", event, " ".join(f"{k}={v}" for k, v in fields.items()))
 
 
+def _find_duplicate_doi(
+    db: firestore.Client, tenant_id: str, doi: str, self_id: str
+) -> str | None:
+    """Return the id of another ACTIVE paper that already owns this DOI, else None.
+
+    Single-field equality query (auto-indexed); lifecycle / self / already-duplicate
+    filtering is done in-process so no composite index is required. R283.
+    """
+    if not (doi or "").strip():
+        return None
+    docs = (
+        db.collection(f"tenants/{tenant_id}/papers")
+        .where("doi", "==", doi)
+        .limit(10)
+        .stream()
+    )
+    for snap in docs:
+        if snap.id == self_id:
+            continue
+        data = snap.to_dict() or {}
+        life = data.get("lifecycleStatus")
+        if life and life != "active":
+            continue
+        if data.get("status") == "duplicate":
+            continue
+        return snap.id
+    return None
+
+
 def process_paper(
     db: firestore.Client,
     tenant_id: str,
@@ -233,6 +262,27 @@ def process_paper(
                 authors=len(meta.authors),
                 document_type=meta.document_type,
             )
+
+            # R283: duplicate-DOI guard — if another active paper already owns this
+            # DOI, mark this one a duplicate and stop (never index the same paper twice).
+            if meta.doi:
+                _dup_owner = _find_duplicate_doi(db, tenant_id, meta.doi, paper_id)
+                if _dup_owner:
+                    db.document(f"tenants/{tenant_id}/papers/{paper_id}").update(
+                        {
+                            "status": "duplicate",
+                            "duplicateOf": _dup_owner,
+                            "statusUpdatedAt": SERVER_TIMESTAMP,
+                            "error": f"Duplicate DOI of paper {_dup_owner}",
+                        }
+                    )
+                    _log_event(
+                        "pipeline_duplicate_doi",
+                        paper=paper_id,
+                        duplicate_of=_dup_owner,
+                        doi=meta.doi,
+                    )
+                    return
         except Exception as exc:  # noqa: BLE001 — non-fatal
             # @r179-6-applied: persist exception detail to Firestore for debug
             error_repr = f"{type(exc).__name__}: {exc}"[:300]

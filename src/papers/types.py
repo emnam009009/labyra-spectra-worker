@@ -39,9 +39,10 @@ PaperStatus = Literal[
     "failed",
     "cancelling",
     "cancelled",
+    "duplicate",
 ]
 
-TERMINAL_STATUSES: frozenset[PaperStatus] = frozenset({"indexed", "failed", "cancelled"})
+TERMINAL_STATUSES: frozenset[PaperStatus] = frozenset({"indexed", "failed", "cancelled", "duplicate"})
 
 CANCELLABLE_STATUSES: frozenset[PaperStatus] = frozenset(
     {"queued", "ocr", "chunking", "enriching", "embedding", "indexing"}
