@@ -71,6 +71,10 @@ _SI_CONTEXT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# R282c: ACS encodes a Supporting-Information file DOI as <article-doi>.sNNN
+# (e.g. 10.1021/acsami.8b17966.s001). Strip the suffix to recover the article DOI.
+_SI_SUFFIX_RE = re.compile(r"\.s\d{1,4}$", re.IGNORECASE)
+
 
 class SelfDoiResult(BaseModel):
     """Outcome of self-DOI extraction. found=False = leave DOI to other steps."""
@@ -116,6 +120,9 @@ def extract_self_doi(pages_text: list[str]) -> SelfDoiResult:
         doi = _normalize_doi(m.group(1) or m.group(2) or "")
         if not doi or not _DOI_VALIDATE_RE.match(doi):
             continue
+        # R282c: ACS SI DOI is <article-doi>.sNNN — strip so it collapses onto the
+        # article DOI instead of winning as a distinct candidate.
+        doi = _SI_SUFFIX_RE.sub("", doi)
         # R282b: drop a DOI sitting in a Supporting-Information context (the SI's
         # own DOI). Tight 50-char lookback catches "ESI available. See DOI:" but
         # not the paper's footer DOI ("..., Vol, Page | DOI:").
@@ -157,7 +164,7 @@ def choose_self_doi(gemini_doi: str, pages_text: list[str]) -> tuple[str, str]:
         return recovered.doi, recovered.source  # "page-text"
     gemini = (gemini_doi or "").strip()
     if gemini:
-        return gemini, "gemini"
+        return _SI_SUFFIX_RE.sub("", gemini), "gemini"  # R282c: drop ACS .sNNN SI suffix
     return "", ""
 
 
