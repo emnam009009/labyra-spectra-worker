@@ -151,6 +151,9 @@ class PaperDoc(BaseModel):
     authors: list[str] = Field(default_factory=list)
     year: int = 0
     doi: str = ""
+    # R282: DOI provenance. labyra-app sets "manual" when the user corrects
+    # the DOI; the orchestrator then preserves it instead of re-extracting.
+    doi_source: str = Field(default="", alias="doiSource")
 
     # ADR-034 TEAM-5: research group for KB isolation. Read from the paper doc
     # (set by labyra-app on upload + backfilled). Default 'lab-shared' matches

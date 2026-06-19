@@ -154,28 +154,39 @@ def process_paper(
             #       by title at Crossref. A wrong DOI poisons topic + references,
             #       so only a title-matched DOI is trusted; otherwise doiVerified
             #       stays False (amber) rather than attaching a confident wrong one.
-            from src.papers.doi_verify import verify_self_doi
-            from src.papers.self_doi_resolver import choose_self_doi
-
-            pages_text = [p.text for p in ocr_result.pages[:3]]
-            gemini_doi = (meta.doi or "").strip()
-            candidate_doi, _candidate_source = choose_self_doi(gemini_doi, pages_text)
-
-            verified = verify_self_doi(
-                candidate_doi, meta.title, meta.authors, meta.year, meta.document_type
-            )
-            meta.doi = verified.doi
-            self_doi_source = verified.source
-            doi_trusted = verified.trusted
-            if (
-                verified.doi
-                and candidate_doi
-                and verified.doi.lower() != candidate_doi.lower()
-            ):
+            # R282: a user-set DOI is authoritative — never let re-extraction
+            # clobber it (the SI DOI on the opening pages used to win every time).
+            if paper.doi_source == "manual" and paper.doi:
+                meta.doi = paper.doi
+                self_doi_source = "manual"
+                doi_trusted = True
                 logger.info(
-                    "self_doi_corrected tenant=%s paper=%s candidate=%r final=%r via=%s",
-                    tenant_id, paper_id, candidate_doi, verified.doi, verified.source,
+                    "self_doi_manual_preserved tenant=%s paper=%s doi=%r",
+                    tenant_id, paper_id, paper.doi,
                 )
+            else:
+                from src.papers.doi_verify import verify_self_doi
+                from src.papers.self_doi_resolver import choose_self_doi
+
+                pages_text = [p.text for p in ocr_result.pages[:3]]
+                gemini_doi = (meta.doi or "").strip()
+                candidate_doi, _candidate_source = choose_self_doi(gemini_doi, pages_text)
+
+                verified = verify_self_doi(
+                    candidate_doi, meta.title, meta.authors, meta.year, meta.document_type
+                )
+                meta.doi = verified.doi
+                self_doi_source = verified.source
+                doi_trusted = verified.trusted
+                if (
+                    verified.doi
+                    and candidate_doi
+                    and verified.doi.lower() != candidate_doi.lower()
+                ):
+                    logger.info(
+                        "self_doi_corrected tenant=%s paper=%s candidate=%r final=%r via=%s",
+                        tenant_id, paper_id, candidate_doi, verified.doi, verified.source,
+                    )
             # Persist input length + output snapshot to Firestore for offline debug
             try:
                 db.document(f"tenants/{tenant_id}/papers/{paper_id}").update({
