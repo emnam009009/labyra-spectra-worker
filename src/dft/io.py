@@ -248,6 +248,17 @@ class FirestoreGcsBatchIO:
         blob = self._storage().bucket(self.bucket).blob(path)
         return blob.download_as_text()
 
+    def read_text(self, path: str) -> str:
+        """Download any GCS blob as text (e.g. fildos/filpdos data files, which
+        fetch_output does not cover since it only retrieves the QE .out stdout)."""
+        return self._storage().bucket(self.bucket).blob(path).download_as_text()
+
+    def list_blobs(self, prefix: str) -> list[str]:
+        """List blob names under a GCS prefix (e.g. a unit dir, to discover the
+        variably-named projwfc *.pdos_atm#N(elem)_wfc#M(l) files)."""
+        bucket = self._storage().bucket(self.bucket)
+        return [b.name for b in bucket.list_blobs(prefix=prefix)]
+
     def save(
         self,
         tenant_id: str,

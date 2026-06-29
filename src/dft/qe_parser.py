@@ -239,6 +239,57 @@ def parse_dos(text):
     }
 
 
+_PDOS_FN_RE = re.compile(r"pdos_atm#(\d+)\(([A-Za-z]+)\)_wfc#(\d+)\(([spdfSPDF])\)")
+
+
+def parse_pdos(files):
+    """Aggregate projwfc PDOS files by (element, orbital l).
+
+    files: dict {filename: text}. Each projwfc file has col0=E(eV), col1=ldos(E)
+    (already summed over m), col2+=per-m pdos. col1 is accumulated across every
+    file sharing the same (element, l) — over all atoms of that element and all
+    of their wfc shells of that l. Returns energies + one series per (element, l),
+    sorted by element then s<p<d<f."""
+    energies = []
+    groups = {}
+    order = []
+    for fname, text in files.items():
+        m = _PDOS_FN_RE.search(fname)
+        if not m:
+            continue
+        elem = m.group(2)
+        l = m.group(4).lower()
+        label = f"{elem}-{l}"
+        es, ld = [], []
+        for line in text.split("\n"):
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            vals = _floats(s)
+            if vals and len(vals) >= 2:
+                es.append(vals[0])
+                ld.append(vals[1])
+        if not ld:
+            continue
+        if not energies:
+            energies = es
+        if label not in groups:
+            groups[label] = [0.0] * len(ld)
+            order.append(label)
+        g = groups[label]
+        n = min(len(g), len(ld))
+        for i in range(n):
+            g[i] += ld[i]
+
+    def _key(lab):
+        elem, orb = lab.split("-")
+        return (elem, "spdf".index(orb) if orb in "spdf" else 9)
+
+    labels = sorted(order, key=_key)
+    series = [{"label": lab, "dos": [round(x, 6) for x in groups[lab]]} for lab in labels]
+    return {"energies_ev": energies, "pdos": series, "n_points": len(energies)}
+
+
 def summarize_results(outputs):
     """Tổng hợp kết quả khoa học có cấu trúc từ text .out các unit (input → usable results).
     outputs: dict {role: out_text} với role ∈ {vc-relax|relax, scf|nscf, bands, dos}.
