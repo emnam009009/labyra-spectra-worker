@@ -399,3 +399,104 @@ async def dos_plot(request: Request) -> dict[str, Any]:
         "fermiEv": fermi,
         "nPoints": len(energies or []),
     }
+
+
+@router.post("/results")
+async def results_summary(request: Request) -> dict[str, Any]:
+    """Consolidated scientific summary: bands gap, DOS@Fermi, PDOS character at
+    VBM/CBM, spin/magnetization, total energy, electrons. No re-run."""
+    from src.dft.qe_parser import (
+        band_gap_from_eigenvalues,
+        parse_bands,
+        parse_dos,
+        parse_pdos,
+        parse_scf_summary,
+        pdos_character,
+    )
+
+    body = await request.json()
+    tenant_id = body.get("tenantId")
+    workflow_id = body.get("workflowId")
+    if not tenant_id or not workflow_id:
+        raise HTTPException(status_code=422, detail="tenantId and workflowId required")
+
+    io = _dft_io()
+    doc = io.load(tenant_id, workflow_id)
+    units = doc.get("units") or []
+    by_calc = {u.get("calcType"): u for u in units}
+    res: dict[str, Any] = {}
+
+    # scf/nscf: energy, fermi, electrons, spin
+    n_elec = None
+    spin_pol = False
+    scf_u = by_calc.get("scf") or by_calc.get("nscf")
+    if scf_u:
+        try:
+            summ = parse_scf_summary(io.fetch_output(tenant_id, workflow_id, scf_u["id"]))
+            n_elec = summ.get("n_electrons")
+            spin_pol = bool(summ.get("spin_polarized"))
+            res["totalEnergyRy"] = summ.get("total_energy_ry")
+            res["fermiEv"] = summ.get("fermi_ev")
+            res["nElectrons"] = n_elec
+            res["scfIterations"] = summ.get("scf_iterations")
+            res["spin"] = {
+                "spinPolarized": spin_pol,
+                "totalMag": summ.get("total_mag"),
+                "absMag": summ.get("abs_mag"),
+            }
+            if summ.get("homo_ev") is not None:
+                res["scfGap"] = {
+                    "homoEv": summ.get("homo_ev"),
+                    "lumoEv": summ.get("lumo_ev"),
+                    "gapEv": summ.get("band_gap_ev"),
+                }
+        except Exception:  # noqa: BLE001
+            pass
+
+    # bands: k-resolved gap
+    gap = None
+    bands_u = by_calc.get("bands")
+    if bands_u and n_elec:
+        try:
+            bres = parse_bands(io.fetch_output(tenant_id, workflow_id, bands_u["id"]))
+            gap = band_gap_from_eigenvalues(bres, n_elec, spin_polarized=spin_pol)
+            res["bandGap"] = gap
+        except Exception:  # noqa: BLE001
+            pass
+
+    # dos: DOS at Fermi
+    energies = None
+    dos_u = by_calc.get("dos")
+    if dos_u:
+        try:
+            names = io.list_blobs(f"workflows/{workflow_id}/units/{dos_u['id']}/")
+            dos_files = [n for n in names if n.endswith(".dos")]
+            if dos_files:
+                d = parse_dos(io.read_text(dos_files[0]))
+                energies = d.get("energies_ev")
+                res["dos"] = {
+                    "fermiEv": d.get("fermi_ev"),
+                    "dosAtFermi": d.get("dos_at_fermi"),
+                    "nPoints": d.get("n_points"),
+                }
+        except Exception:  # noqa: BLE001
+            pass
+
+    # pdos: orbital character at VBM/CBM
+    pdos_u = by_calc.get("pdos")
+    if pdos_u and gap:
+        try:
+            names = io.list_blobs(f"workflows/{workflow_id}/units/{pdos_u['id']}/")
+            pn = [n for n in names if "pdos_atm#" in n]
+            files = {n.split("/")[-1]: io.read_text(n) for n in pn}
+            p = parse_pdos(files)
+            pe = p.get("energies_ev")
+            ps = p.get("pdos") or []
+            res["pdosCharacter"] = {
+                "vbm": pdos_character(pe, ps, gap["vbm_ev"]),
+                "cbm": pdos_character(pe, ps, gap["cbm_ev"]),
+            }
+        except Exception:  # noqa: BLE001
+            pass
+
+    return res

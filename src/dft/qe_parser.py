@@ -27,6 +27,7 @@ def parse_scf_summary(text):
         "total_energy_ry": None, "homo_ev": None, "lumo_ev": None,
         "band_gap_ev": None, "fermi_ev": None, "scf_iterations": None,
         "n_electrons": None, "nbnd": None, "alat_bohr": None, "job_done": False,
+        "total_mag": None, "abs_mag": None, "spin_polarized": False,
     }
     # total energy: lấy giá trị CUỐI (sau cùng) — run cuối là trên cấu trúc tối ưu
     te = re.findall(r"^!\s+total energy\s+=\s+(-?[\d.]+)\s+Ry", text, re.M)
@@ -59,6 +60,14 @@ def parse_scf_summary(text):
     m = re.search(r"lattice parameter \(alat\)\s+=\s+([\d.]+)", text)
     if m:
         out["alat_bohr"] = float(m.group(1))
+
+    mm = re.findall(r"total magnetization\s+=\s+(-?[\d.]+)\s+Bohr mag/cell", text)
+    if mm:
+        out["total_mag"] = float(mm[-1])
+    ma = re.findall(r"absolute magnetization\s+=\s+([\d.]+)\s+Bohr mag/cell", text)
+    if ma:
+        out["abs_mag"] = float(ma[-1])
+    out["spin_polarized"] = bool(mm)
 
     out["job_done"] = "JOB DONE." in text
     return out
@@ -288,6 +297,24 @@ def parse_pdos(files):
     labels = sorted(order, key=_key)
     series = [{"label": lab, "dos": [round(x, 6) for x in groups[lab]]} for lab in labels]
     return {"energies_ev": energies, "pdos": series, "n_points": len(energies)}
+
+
+def pdos_character(energies, pdos_series, target_ev, top=4):
+    """Orbital character at an energy (e.g. VBM/CBM): % each (element,l) contributes.
+    Returns [{label, pct}] sorted desc, top entries with pct>0."""
+    if not energies or not pdos_series:
+        return []
+    i = min(range(len(energies)), key=lambda j: abs(energies[j] - target_ev))
+    vals = []
+    for s in pdos_series:
+        d = s.get("dos") or []
+        vals.append((s.get("label", "?"), d[i] if i < len(d) else 0.0))
+    tot = sum(v for _, v in vals)
+    if tot <= 0:
+        return []
+    contribs = [(lab, v / tot * 100.0) for lab, v in vals if v > 0]
+    contribs.sort(key=lambda x: -x[1])
+    return [{"label": lab, "pct": round(pct, 1)} for lab, pct in contribs[:top]]
 
 
 def summarize_results(outputs):
