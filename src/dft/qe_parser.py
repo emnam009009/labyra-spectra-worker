@@ -8,6 +8,62 @@ import math
 import re
 
 BOHR_TO_ANG = 0.529177210903
+AMU_TO_G = 1.66053906660e-24
+
+# Standard atomic weights (g/mol ≈ amu) — enough for common inorganic materials.
+ATOMIC_MASS = {
+    "H": 1.008, "He": 4.0026, "Li": 6.94, "Be": 9.0122, "B": 10.81, "C": 12.011,
+    "N": 14.007, "O": 15.999, "F": 18.998, "Ne": 20.180, "Na": 22.990, "Mg": 24.305,
+    "Al": 26.982, "Si": 28.085, "P": 30.974, "S": 32.06, "Cl": 35.45, "Ar": 39.948,
+    "K": 39.098, "Ca": 40.078, "Sc": 44.956, "Ti": 47.867, "V": 50.942, "Cr": 51.996,
+    "Mn": 54.938, "Fe": 55.845, "Co": 58.933, "Ni": 58.693, "Cu": 63.546, "Zn": 65.38,
+    "Ga": 69.723, "Ge": 72.630, "As": 74.922, "Se": 78.971, "Br": 79.904, "Kr": 83.798,
+    "Rb": 85.468, "Sr": 87.62, "Y": 88.906, "Zr": 91.224, "Nb": 92.906, "Mo": 95.95,
+    "Ru": 101.07, "Rh": 102.91, "Pd": 106.42, "Ag": 107.87, "Cd": 112.41, "In": 114.82,
+    "Sn": 118.71, "Sb": 121.76, "Te": 127.60, "I": 126.90, "Xe": 131.29, "Cs": 132.91,
+    "Ba": 137.33, "La": 138.91, "Ce": 140.12, "Hf": 178.49, "Ta": 180.95, "W": 183.84,
+    "Re": 186.21, "Os": 190.23, "Ir": 192.22, "Pt": 195.08, "Au": 196.97, "Hg": 200.59,
+    "Tl": 204.38, "Pb": 207.2, "Bi": 208.98,
+}
+
+
+def _density_g_cm3(species, volume_ang3):
+    """Crystal density (g/cm³) from the relaxed cell: Σ atomic mass / unit-cell
+    volume. Returns None if the volume is missing or any element is unknown."""
+    if not species or not volume_ang3 or volume_ang3 <= 0:
+        return None
+    try:
+        total_amu = sum(ATOMIC_MASS[s] for s in species)
+    except KeyError:
+        return None  # unknown element → don't guess
+    # g/cm³ = (Σ amu · g/amu) / (V · cm³/Å³);  1e-24 cm³/Å³ cancels AMU_TO_G's 1e-24
+    return round(total_amu * AMU_TO_G / (volume_ang3 * 1e-24), 3)
+
+
+def _walltime_to_seconds(s):
+    """Parse a QE wall-time token ('48.90s', '2m20.12s', '1h27m', '3h20m15s')."""
+    m = re.fullmatch(r"(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?\s*(?:([\d.]+)\s*s)?", s.strip())
+    if not m or not any(m.groups()):
+        return None
+    h = int(m.group(1)) if m.group(1) else 0
+    mins = int(m.group(2)) if m.group(2) else 0
+    sec = float(m.group(3)) if m.group(3) else 0.0
+    val = h * 3600 + mins * 60 + sec
+    return round(val, 2) if val > 0 else None
+
+
+def parse_walltime(text):
+    """Total wall-clock seconds from the QE timing footer — the program-total
+    line ('PWSCF : … CPU … WALL', also DOS/PROJWFC/BANDS), which unlike the
+    per-routine lines has no '( N calls)' suffix. Returns None if absent."""
+    total = None
+    for m in re.finditer(
+        r"^\s*([A-Z][A-Z0-9_]+)\s*:\s+.*?CPU\s+(\S.*?)\s+WALL\s*$", text, re.M
+    ):
+        secs = _walltime_to_seconds(m.group(2))
+        if secs is not None:
+            total = secs  # keep the last (final program total)
+    return total
 
 
 def _floats(line):
@@ -337,6 +393,7 @@ def summarize_results(outputs):
                 "coa": round(c / a, 4) if a else None,
                 "volumeAng3": fs.get("volume_ang3"),
                 "nAtoms": fs.get("n_atoms"),
+                "density": _density_g_cm3(fs.get("species") or [], fs.get("volume_ang3")),
             }
 
     sc_txt = outputs.get("scf") or outputs.get("nscf")

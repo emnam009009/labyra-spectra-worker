@@ -506,7 +506,7 @@ async def results_summary(request: Request) -> dict[str, Any]:
 async def convergence_history(request: Request) -> dict[str, Any]:
     """SCF accuracy + per-ionic-step energy/force for a relax/vc-relax/scf unit.
     Picks vc-relax > relax > scf by default, or an explicit unitId. No re-run."""
-    from src.dft.qe_parser import parse_convergence
+    from src.dft.qe_parser import parse_convergence, parse_walltime
 
     body = await request.json()
     tenant_id = body.get("tenantId")
@@ -535,11 +535,13 @@ async def convergence_history(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="no vc-relax/relax/scf unit")
 
     try:
-        conv = parse_convergence(io.fetch_output(tenant_id, workflow_id, unit["id"]))
+        out_text = io.fetch_output(tenant_id, workflow_id, unit["id"])
+        conv = parse_convergence(out_text)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=422, detail=f"convergence parse failed: {str(exc)[:200]}"
         ) from exc
     conv["calcType"] = calc
     conv["unitId"] = unit["id"]
+    conv["wallSeconds"] = parse_walltime(out_text)
     return conv
