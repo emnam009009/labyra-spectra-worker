@@ -500,3 +500,46 @@ async def results_summary(request: Request) -> dict[str, Any]:
             pass
 
     return res
+
+
+@router.post("/convergence")
+async def convergence_history(request: Request) -> dict[str, Any]:
+    """SCF accuracy + per-ionic-step energy/force for a relax/vc-relax/scf unit.
+    Picks vc-relax > relax > scf by default, or an explicit unitId. No re-run."""
+    from src.dft.qe_parser import parse_convergence
+
+    body = await request.json()
+    tenant_id = body.get("tenantId")
+    workflow_id = body.get("workflowId")
+    if not tenant_id or not workflow_id:
+        raise HTTPException(status_code=422, detail="tenantId and workflowId required")
+
+    io = _dft_io()
+    doc = io.load(tenant_id, workflow_id)
+    units = doc.get("units") or []
+    by_calc = {u.get("calcType"): u for u in units}
+
+    unit = None
+    calc = None
+    req_uid = body.get("unitId")
+    if req_uid:
+        unit = next((u for u in units if u.get("id") == req_uid), None)
+        calc = unit.get("calcType") if unit else None
+    if not unit:
+        for ct in ("vc-relax", "relax", "scf"):
+            if by_calc.get(ct):
+                unit = by_calc[ct]
+                calc = ct
+                break
+    if not unit:
+        raise HTTPException(status_code=404, detail="no vc-relax/relax/scf unit")
+
+    try:
+        conv = parse_convergence(io.fetch_output(tenant_id, workflow_id, unit["id"]))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=422, detail=f"convergence parse failed: {str(exc)[:200]}"
+        ) from exc
+    conv["calcType"] = calc
+    conv["unitId"] = unit["id"]
+    return conv
