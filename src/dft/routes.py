@@ -22,6 +22,8 @@ from fastapi import APIRouter, HTTPException, Request, status
 from src.config import get_settings
 from src.dft import structure as dft_structure
 from src.dft.generator import generate_postproc_input, generate_pw_input
+from src.dft.scene import build_scene, export_structure
+from pydantic import BaseModel as _BaseModel
 from src.dft.batch_client import get_job_labels
 from src.dft.driver import advance
 from src.dft.errors import FatalError
@@ -72,6 +74,37 @@ def build_structure(req: StructureRequest) -> dict[str, Any]:
     except HTTPException:
         raise
     except ValueError as exc:  # sanity failure / bad structure
+        raise HTTPException(status_code=400, detail=str(exc)[:300]) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)[:300]) from exc
+
+
+class _SceneRequest(_BaseModel):
+    structure: dict[str, Any]
+
+
+class _ExportRequest(_BaseModel):
+    structure: dict[str, Any]
+    fmt: str
+
+
+@router.post("/structure/scene")
+def structure_scene(req: _SceneRequest) -> dict[str, Any]:
+    """Reconstruct a stored DftStructure → render scene (atoms + CrystalNN bonds)."""
+    try:
+        return build_scene(req.structure)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)[:300]) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)[:300]) from exc
+
+
+@router.post("/structure/export")
+def structure_export(req: _ExportRequest) -> dict[str, str]:
+    """Emit CIF / POSCAR text for a stored DftStructure."""
+    try:
+        return {"fmt": req.fmt, "text": export_structure(req.structure, req.fmt)}
+    except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)[:300]) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)[:300]) from exc

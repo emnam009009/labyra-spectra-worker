@@ -68,6 +68,9 @@ def to_dft_structure(
         # JSON object keys stringify on serialization; Jinja2 .items() handles either.
         "celldm": dict(res["celldm"]) if res["celldm"] else {},
         "cellParameters": res["cell_ang"].tolist() if ibrav == 0 else None,
+        # cellAng: always the Angstrom cell (any ibrav) — used to reconstruct the
+        # structure for the 3D viewer / export; the pw.in template ignores it.
+        "cellAng": res["cell_ang"].tolist(),
         "nat": len(s),
         "ntyp": len(species),
         "atomicSpecies": species,
