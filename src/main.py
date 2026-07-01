@@ -512,6 +512,11 @@ class MaterialSyncRequest(_BaseModel):
     formulas: list[str] | None = None  # None = sync DEFAULT_FORMULAS
 
 
+class MaterialSearchRequest(_BaseModel):
+    query: str
+    limit: _Optional[int] = 30
+
+
 @app.post("/materials/sync")
 async def sync_materials(req: MaterialSyncRequest, request: Request) -> dict:
     """
@@ -549,6 +554,30 @@ async def sync_materials(req: MaterialSyncRequest, request: Request) -> dict:
     }
 
 # ── R185-4f: cache observability ──────────────────────────────────────────────
+
+@app.post("/materials/search")
+async def search_materials_endpoint(req: MaterialSearchRequest, request: Request) -> dict:
+    """
+    Search Materials Project by mp-id / chemical system / elements / formula and
+    return a lean result list for the structure-import picker (no Firestore write).
+
+    POST /materials/search
+    Body: {"query": "WO3", "limit": 30}
+    """
+    from src.materials.mp_sync import search_materials
+
+    settings = get_settings()
+    if not settings.mp_api_key:
+        return {"error": "MP_API_KEY not configured", "results": []}
+
+    q = (req.query or "").strip()
+    if not q:
+        return {"query": "", "count": 0, "results": []}
+
+    limit = max(1, min(req.limit or 30, 100))
+    results = search_materials(q, settings.mp_api_key, limit)
+    return {"query": q, "count": len(results), "results": results}
+
 
 @app.get("/materials/cache-stats")
 def materials_cache_stats() -> dict:

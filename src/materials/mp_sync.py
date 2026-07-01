@@ -287,3 +287,81 @@ def sync_batch(
             logger.exception("Sync failed for %s", formula)
             results.append({"formula": formula, "status": "error", "error": str(exc)[:200]})
     return results
+
+
+# ── R323w: MP search for structure-import picker (Materials-Explorer style) ────
+
+
+def _doc_to_search_result(doc: Any) -> dict[str, Any]:
+    """Project one MP summary doc to a lean row for the import picker."""
+    symmetry = getattr(doc, "symmetry", None)
+    crystal_system = ""
+    space_group = ""
+    space_group_number = None
+    if symmetry:
+        crystal_system = str(getattr(symmetry, "crystal_system", "") or "")
+        space_group = str(getattr(symmetry, "symbol", "") or "")
+        space_group_number = getattr(symmetry, "number", None)
+
+    eah = getattr(doc, "energy_above_hull", None)
+    band_gap = getattr(doc, "band_gap", None)
+    return {
+        "mpId": str(getattr(doc, "material_id", "") or ""),
+        "formula": str(getattr(doc, "formula_pretty", "") or ""),
+        "crystalSystem": crystal_system,
+        "spaceGroup": space_group,
+        "spaceGroupNumber": space_group_number,
+        "nsites": getattr(doc, "nsites", None),
+        "energyAboveHull": round(eah, 4) if eah is not None else None,
+        "bandGap": round(band_gap, 4) if band_gap is not None else None,
+        "isGapDirect": getattr(doc, "is_gap_direct", None),
+        "theoretical": getattr(doc, "theoretical", None),
+    }
+
+
+def search_materials(query: str, api_key: str, limit: int = 30) -> list[dict[str, Any]]:
+    """
+    Search Materials Project and return a lean result list (NO Firestore write).
+
+    Query heuristic (mirrors the MP Explorer input):
+      - "mp-1234"        -> exact material id
+      - "Li-Fe-O"        -> chemical system (only these elements)
+      - "Li,Fe"          -> at-least-these elements
+      - "WO3" / "Li3Fe"  -> reduced formula
+    Results are sorted by energy_above_hull (most stable first).
+    """
+    try:
+        from mp_api.client import MPRester  # type: ignore[import]
+    except ImportError:
+        logger.error("mp_api not installed")
+        return []
+
+    q = query.strip()
+    if not q:
+        return []
+
+    kwargs: dict[str, Any] = {"fields": _SUMMARY_FIELDS}
+    if q.lower().startswith("mp-"):
+        kwargs["material_ids"] = [q]
+    elif "," in q:
+        kwargs["elements"] = [e.strip() for e in q.split(",") if e.strip()]
+    elif "-" in q:
+        kwargs["chemsys"] = q
+    else:
+        kwargs["formula"] = q
+
+    try:
+        with MPRester(api_key) as mpr:
+            docs = mpr.summary.search(**kwargs)
+    except Exception:
+        logger.exception("MP search failed: %s", query)
+        return []
+
+    def sort_key(d: Any) -> tuple[float, int]:
+        hull = getattr(d, "energy_above_hull", None)
+        hull = hull if hull is not None else 9999.0
+        mid = str(getattr(d, "material_id", "mp-999999")).replace("mp-", "")
+        return (float(hull), int(mid) if mid.isdigit() else 999999)
+
+    docs_sorted = sorted(docs, key=sort_key)[:limit]
+    return [_doc_to_search_result(d) for d in docs_sorted]
