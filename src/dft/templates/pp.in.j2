@@ -6,6 +6,10 @@
 {%- if p.plotNum == 5 %}
     sample_bias = {{ "%+.1f"|format(p.sampleBias) }},
 {%- endif %}
+{%- if p.plotNum == 7 %}
+    kpoint(1)   = {{ p.kpoint | default(1) }},
+    kband(1)    = {{ p.kband | default(1) }},
+{%- endif %}
 /
 &PLOT
     nfile         = 1,

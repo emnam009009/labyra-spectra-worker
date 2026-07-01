@@ -2,5 +2,8 @@
     prefix      = '{{ wf.prefix }}',
     outdir      = '{{ unit.outdir }}',
     filband     = '{{ wf.functional | upper }}_{{ wf.prefix }}.band',
+{%- if p.spinComponent %}
+    spin_component = {{ p.spinComponent }},
+{%- endif %}
     lsym        = .true.,
 /
