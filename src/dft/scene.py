@@ -65,10 +65,14 @@ def _reconstruct(structure: dict[str, Any]):
     if not cell:
         raise ValueError("structure has no Angstrom cell — re-import to enable 3D view")
 
+    matrix = np.array(cell, dtype=float)
+    if matrix.ndim == 1:  # flat 9 (cellAng) → 3×3
+        matrix = matrix.reshape(3, 3)
+
     positions = structure.get("atomicPositions") or []
     species = [p["element"] for p in positions]
     coords = [[float(p["x"]), float(p["y"]), float(p["z"])] for p in positions]
-    lattice = Lattice(cell)
+    lattice = Lattice(matrix)
     cartesian = structure.get("positionsType") == "angstrom"
     return Structure(lattice, species, coords, coords_are_cartesian=cartesian)
 
