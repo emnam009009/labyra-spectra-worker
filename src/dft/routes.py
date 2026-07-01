@@ -111,33 +111,23 @@ def structure_export(req: _ExportRequest) -> dict[str, str]:
 
 
 @router.post("/kpath")
-def build_kpath(req: StructureRequest) -> dict[str, Any]:
+def build_kpath(req: _SceneRequest) -> dict[str, Any]:
     """High-symmetry BZ path (seekpath) for a bands K_POINTS {crystal_b} input.
 
-    seekpath standardizes the cell — pair this path with the standardized primitive
-    structure from /dft/structure (use_primitive=True), or supply a manual path.
+    Accepts a stored DftStructure (reconstructed to a pymatgen cell). seekpath
+    standardizes the cell, so pair this path with the standardized primitive
+    structure from /dft/structure (use_primitive=True).
     """
-    from pymatgen.core import Structure
-
     from src.dft.kpath import get_kpath
+    from src.dft.scene import _reconstruct
 
     try:
-        if req.source == "cif" and req.cif_text:
-            st = Structure.from_str(req.cif_text, fmt="cif")
-        elif req.source == "poscar" and req.poscar_text:
-            st = Structure.from_str(req.poscar_text, fmt="poscar")
-        elif req.source == "mp_id" and req.mp_id and req.mp_api_key:
-            from mp_api.client import MPRester
-
-            with MPRester(req.mp_api_key) as mpr:
-                st = mpr.get_structure_by_material_id(req.mp_id)
-        else:
-            raise HTTPException(status_code=400, detail="invalid/missing structure source for kpath")
+        st = _reconstruct(req.structure)
         return get_kpath(st)
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=str(exc)[:300]) from exc
+        raise HTTPException(status_code=400, detail=f"kpath failed: {str(exc)[:300]}") from exc
 
 
 @router.post("/generate")

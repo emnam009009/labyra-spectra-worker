@@ -48,4 +48,5 @@ def get_kpath(struct: Structure, npoints_per_segment: int = 20) -> dict[str, Any
     if path:
         path[-1]["npoints"] = 1  # final point: no continuation
 
-    return {"point_coords": coords, "segments": segments, "path": path}
+    bravais = res.get("bravais_lattice_extended") or res.get("bravais_lattice")
+    return {"point_coords": coords, "segments": segments, "path": path, "bravais": bravais}
