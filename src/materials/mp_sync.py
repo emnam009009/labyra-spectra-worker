@@ -305,6 +305,8 @@ def _doc_to_search_result(doc: Any) -> dict[str, Any]:
 
     eah = getattr(doc, "energy_above_hull", None)
     band_gap = getattr(doc, "band_gap", None)
+    density = getattr(doc, "density", None)
+    volume = getattr(doc, "volume", None)
     return {
         "mpId": str(getattr(doc, "material_id", "") or ""),
         "formula": str(getattr(doc, "formula_pretty", "") or ""),
@@ -315,6 +317,8 @@ def _doc_to_search_result(doc: Any) -> dict[str, Any]:
         "energyAboveHull": round(eah, 4) if eah is not None else None,
         "bandGap": round(band_gap, 4) if band_gap is not None else None,
         "isGapDirect": getattr(doc, "is_gap_direct", None),
+        "density": round(density, 4) if density is not None else None,
+        "volume": round(volume, 3) if volume is not None else None,
         "theoretical": getattr(doc, "theoretical", None),
     }
 
