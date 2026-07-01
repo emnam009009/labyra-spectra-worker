@@ -19,6 +19,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 
+from src.config import get_settings
 from src.dft import structure as dft_structure
 from src.dft.generator import generate_postproc_input, generate_pw_input
 from src.dft.batch_client import get_job_labels
@@ -58,10 +59,14 @@ def build_structure(req: StructureRequest) -> dict[str, Any]:
                 req.poscar_text, req.pseudo_map,
                 use_primitive=req.use_primitive, prefer_ibrav=req.prefer_ibrav,
             )
-        if not (req.mp_id and req.mp_api_key):
-            raise HTTPException(status_code=400, detail="mp_id and mp_api_key required for source=mp_id")
+        api_key = req.mp_api_key or get_settings().mp_api_key
+        if not (req.mp_id and api_key):
+            raise HTTPException(
+                status_code=400,
+                detail="mp_id required for source=mp_id (and an MP API key must be configured)",
+            )
         return dft_structure.from_mp_id(
-            req.mp_id, req.mp_api_key, req.pseudo_map,
+            req.mp_id, api_key, req.pseudo_map,
             use_primitive=req.use_primitive, prefer_ibrav=req.prefer_ibrav,
         )
     except HTTPException:
