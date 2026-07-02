@@ -40,6 +40,7 @@ _PW_CALCS = {"vc-relax", "relax", "scf", "nscf", "bands"}
 _EXECUTABLE = {
     "vc-relax": "pw.x", "relax": "pw.x", "scf": "pw.x", "nscf": "pw.x", "bands": "pw.x",
     "ppbands": "bands.x", "dos": "dos.x", "pdos": "projwfc.x", "charge": "pp.x",
+    "avgpot": "average.x",
 }
 
 

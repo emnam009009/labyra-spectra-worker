@@ -664,7 +664,7 @@ from src.dft.routes import router as dft_router  # noqa: E402
 app.include_router(dft_router)
 
 
-_DFT_POSTPROC = {"ppbands", "dos", "pdos", "charge"}
+_DFT_POSTPROC = {"ppbands", "dos", "pdos", "charge", "avgpot"}
 
 
 @app.post("/dft/preview")

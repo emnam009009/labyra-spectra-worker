@@ -52,11 +52,16 @@ if [ -n "${GCS_DEPS:-}" ]; then
   for dep in $GCS_DEPS; do
     echo "[entrypoint] restarting from dependency outdir $dep"
     gsutil -q -m cp -r "${dep%/}/out/*" "$WORK/out/" || true
+    # pp.x artifacts (filplot/cube) live under charge/ — stage them for average.x
+    gsutil -q -m cp -r "${dep%/}/charge" "$WORK/" 2>/dev/null || true
   done
 fi
 
 echo "[entrypoint] run: $QE_BINARY ${POOLFLAG[*]:-} -in $QE_IN  (np=$NPROC, omp=$OMP_NUM_THREADS, npool=$NPOOL)"
-if [ "$NPROC" -gt 1 ]; then
+if [ "$(basename "$QE_BINARY")" = "average.x" ]; then
+  # average.x reads free-form lines from stdin (not a namelist) — serial is fine.
+  "$QE_BINARY" < "$QE_IN" > "$QE_OUT" 2>&1
+elif [ "$NPROC" -gt 1 ]; then
   mpirun --allow-run-as-root -np "$NPROC" "$QE_BINARY" ${POOLFLAG[@]+"${POOLFLAG[@]}"} -in "$QE_IN" > "$QE_OUT" 2>&1
 else
   "$QE_BINARY" ${POOLFLAG[@]+"${POOLFLAG[@]}"} -in "$QE_IN" > "$QE_OUT" 2>&1
@@ -69,6 +74,10 @@ gsutil -q cp "$WORK/$QE_OUT" "${GCS_WORK%/}/$QE_OUT" || true
 if [ -n "$(ls -A "$WORK/out" 2>/dev/null)" ]; then
   echo "[entrypoint] uploading outdir (.save) for downstream units"
   gsutil -q -m cp -r "$WORK/out" "${GCS_WORK%/}/" || true
+fi
+if [ -d "$WORK/charge" ] && [ -n "$(ls -A "$WORK/charge" 2>/dev/null)" ]; then
+  echo "[entrypoint] uploading charge/ (pp.x filplot + cube)"
+  gsutil -q -m cp -r "$WORK/charge" "${GCS_WORK%/}/" || true
 fi
 shopt -s nullglob
 for f in "$WORK"/*.band "$WORK"/*.band.gnu "$WORK"/*.cube "$WORK"/*.dos "$WORK"/*.pdos_* "$WORK"/*.dat; do

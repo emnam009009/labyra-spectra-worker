@@ -31,7 +31,8 @@ _POSTPROC_TEMPLATE: dict[str, str] = {
     "ppbands": "bands.in.j2",  # bands.x — reorder/symmetrize eigenvalues for plotting
     "dos": "dos.in.j2",        # dos.x   — total DOS
     "pdos": "projwfc.in.j2",   # projwfc.x — projected DOS / LDOS
-    "charge": "pp.in.j2",      # pp.x    — charge density / STM (plot_num)
+    "charge": "pp.in.j2",      # pp.x    — charge density / STM (plot_num),
+    "avgpot": "average.in.j2",
 }
 
 
