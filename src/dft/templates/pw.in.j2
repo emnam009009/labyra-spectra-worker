@@ -7,13 +7,16 @@
     wfcdir         = '{{ unit.outdir }}',
     wf_collect     = .false.,
 {%- endif %}
-    restart_mode   = 'from_scratch',
+    restart_mode   = '{{ p.restartMode | default("from_scratch") }}',
     verbosity      = 'high',
+{%- if p.nstep %}
+    nstep          = {{ p.nstep }},
+{%- endif %}
     tstress        = {{ p.tstress | qe_bool }},
     tprnfor        = {{ p.tprnfor | qe_bool }},
-{%- if p.calculation == 'vc-relax' %}
-    etot_conv_thr  = 1.0d-6,
-    forc_conv_thr  = 4.5d-4,
+{%- if p.calculation in ['relax', 'vc-relax'] %}
+    etot_conv_thr  = {{ p.etotConvThr | default(1e-6) | qe_sci }},
+    forc_conv_thr  = {{ p.forcConvThr | default(4.5e-4) | qe_sci }},
 {%- endif %}
 /
 &SYSTEM
@@ -29,7 +32,7 @@
     ecutwfc     = {{ wf.ecutwfc }},
     ecutrho     = {{ wf.ecutrho }},
     input_dft   = '{{ wf.functional }}',
-    nspin       = 1,
+    nspin       = {{ p.nspin | default(1) }},
 {%- if p.occupations %}
     occupations = '{{ p.occupations }}',
 {%- if p.occupations == 'smearing' %}
@@ -53,10 +56,10 @@
 &ELECTRONS
     conv_thr         = {{ p.convThr | qe_sci }},
     mixing_beta      = {{ p.mixingBeta | default(0.2) }},
-    diagonalization  = 'david',
+    diagonalization  = '{{ p.diagonalization | default("david") }}',
     diago_david_ndim = {{ p.diagoDavidNdim | default(8) }},
     mixing_ndim      = 20,
-    mixing_mode      = 'plain',
+    mixing_mode      = '{{ p.mixingMode | default("plain") }}',
     diago_full_acc   = {{ p.diagoFullAcc | default(false) | qe_bool }},
 {%- if p.electronMaxstep %}
     electron_maxstep = {{ p.electronMaxstep }},
@@ -64,14 +67,20 @@
     startingpot      = 'atomic',
     startingwfc      = 'atomic+random',
 /
-{%- if p.calculation == 'vc-relax' %}
+{%- if p.calculation in ['relax', 'vc-relax'] %}
 &IONS
     ion_dynamics     = '{{ p.ionDynamics | default("bfgs") }}',
+{%- if p.bfgsNdim %}
+    bfgs_ndim        = {{ p.bfgsNdim }},
+{%- endif %}
     upscale          = 100,
     trust_radius_max = 0.8,
 /
+{%- endif %}
+{%- if p.calculation == 'vc-relax' %}
 &CELL
     cell_dynamics  = '{{ p.cellDynamics | default("bfgs") }}',
+    press          = {{ p.press | default(0.0) }},
     cell_dofree    = '{{ p.cellDofree | default("all") }}',
     press_conv_thr = 0.5,
 /
