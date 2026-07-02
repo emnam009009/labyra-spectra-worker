@@ -490,6 +490,72 @@ async def bands_plot(request: Request) -> dict[str, Any]:
     }
 
 
+_RY_EV = 13.605693122994
+_BOHR_A = 0.529177210903
+
+
+@router.post("/avgpot")
+async def avgpot_plot(request: Request) -> dict[str, Any]:
+    """Planar/macroscopic-averaged electrostatic potential V(z) from an
+    ``avgpot`` unit's avg.dat (average.x: columns z[bohr], planar[Ry], macro[Ry]).
+    Returned converted to Å / eV. vacuumEv = max of the macroscopic (or planar)
+    curve — the vacuum plateau for a slab with enough vacuum."""
+    body = await request.json()
+    tenant_id = body.get("tenantId")
+    workflow_id = body.get("workflowId")
+    unit_id = body.get("unitId")
+    if not tenant_id or not workflow_id:
+        raise HTTPException(status_code=422, detail="tenantId and workflowId required")
+
+    io = _dft_io()
+    doc = io.load(tenant_id, workflow_id)
+    units = doc.get("units") or []
+    unit = next(
+        (u for u in units if u.get("id") == unit_id) if unit_id
+        else (u for u in units if u.get("calcType") == "avgpot"),
+        None,
+    )
+    if not unit or unit.get("calcType") != "avgpot":
+        raise HTTPException(status_code=404, detail="workflow has no 'avgpot' unit")
+
+    try:
+        names = io.list_blobs(f"workflows/{workflow_id}/units/{unit['id']}/")
+        dat = [n for n in names if n.endswith("avg.dat")]
+        if not dat:
+            raise HTTPException(status_code=404, detail="avg.dat not found (unit finished?)")
+        z: list[float] = []
+        planar: list[float] = []
+        macro: list[float] = []
+        for line in io.read_text(dat[0]).splitlines():
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            try:
+                vals = [float(x) for x in parts[:3]]
+            except ValueError:
+                continue
+            z.append(vals[0] * _BOHR_A)
+            planar.append(vals[1] * _RY_EV)
+            macro.append((vals[2] if len(vals) > 2 else vals[1]) * _RY_EV)
+        if not z:
+            raise HTTPException(status_code=422, detail="avg.dat parsed to zero rows")
+        ref = macro if any(abs(v) > 1e-12 for v in macro) else planar
+        return {
+            "unitId": unit["id"],
+            "z": z,
+            "planar": planar,
+            "macro": macro,
+            "vacuumEv": max(ref),
+            "nPoints": len(z),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=422, detail=f"avgpot read/parse failed: {str(exc)[:200]}"
+        ) from exc
+
+
 @router.post("/dos")
 async def dos_plot(request: Request) -> dict[str, Any]:
     """Total DOS (dos.x fildos) + element/orbital-projected DOS (projwfc filpdos)
