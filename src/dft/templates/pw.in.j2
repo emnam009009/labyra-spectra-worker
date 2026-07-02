@@ -88,7 +88,7 @@
 
 ATOMIC_SPECIES
 {%- for sp in s.atomicSpecies %}
-{{ sp.element }}   {{ sp.mass }}  {{ sp.pseudoFile }}
+{{ sp.element }}   {{ sp.mass }}  {{ (wf.pseudoMap or {}).get(sp.element) or sp.pseudoFile }}
 {%- endfor %}
 {% if s.ibrav == 0 %}
 CELL_PARAMETERS angstrom

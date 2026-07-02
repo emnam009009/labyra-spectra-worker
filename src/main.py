@@ -710,6 +710,7 @@ async def dft_preview(request: Request) -> dict[str, str]:
                 ecutrho=ecutrho,
                 functional=functional,
                 hubbard=g.get("hubbard"),
+                pseudo_map=g.get("pseudoMap"),
                 outdir="./out",
             )
     except Exception as exc:  # preview is read-only — surface any render error as 422

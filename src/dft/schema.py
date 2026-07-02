@@ -47,6 +47,7 @@ class GenerateRequest(BaseModel):
     ecutwfc: float
     ecutrho: float
     hubbard: list[HubbardItem] = []
+    pseudo_map: dict[str, str] = {}
     units: list[UnitRequest]
 
 

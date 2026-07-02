@@ -65,6 +65,7 @@ def generate_pw_input(
     ecutrho: float,
     functional: str = "pbe",
     hubbard: list[dict[str, Any]] | None = None,
+    pseudo_map: dict[str, str] | None = None,
     outdir: str | None = None,
 ) -> str:
     """Render a pw.x input (.in) for one calculation.
@@ -84,6 +85,7 @@ def generate_pw_input(
         "ecutrho": ecutrho,
         "functional": functional,
         "hubbard": hubbard or [],
+        "pseudoMap": pseudo_map or {},
     }
     unit = {"outdir": outdir or f"./outdir_{calc}"}
     return _env().get_template(template_name).render(wf=wf, unit=unit, s=structure, p=params)

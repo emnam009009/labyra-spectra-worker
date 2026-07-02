@@ -298,7 +298,8 @@ class FirestoreGcsBatchIO:
         ecutrho = float(g.get("ecutrho", ecutwfc * 4.0))
         return generate_pw_input(
             structure, params, prefix=prefix, ecutwfc=ecutwfc, ecutrho=ecutrho,
-            functional=functional, hubbard=g.get("hubbard"), outdir=_STAGED_OUTDIR,
+            functional=functional, hubbard=g.get("hubbard"),
+            pseudo_map=g.get("pseudoMap"), outdir=_STAGED_OUTDIR,
         )
 
     def _upload(self, path: str, text: str) -> None:

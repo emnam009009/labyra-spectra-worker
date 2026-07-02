@@ -130,6 +130,76 @@ def build_kpath(req: _SceneRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=f"kpath failed: {str(exc)[:300]}") from exc
 
 
+_PSEUDO_PREFIX = "pseudo"
+_MAX_UPF_BYTES = 20 * 1024 * 1024  # 20 MB — generous for a single UPF
+
+
+def _element_from_upf_name(name: str) -> str | None:
+    """Best-effort element guess from a UPF filename (e.g. 'W.pbe-...UPF' → 'W',
+    'Fe_ONCV...upf' → 'Fe'). Convention-based hint only; the user can reassign."""
+    import re
+
+    m = re.match(r"^([A-Z][a-z]?)(?=[._\-]|$)", name)
+    return m.group(1) if m else None
+
+
+def _pseudo_bucket() -> Any:
+    from google.cloud import storage
+
+    s = get_settings()
+    return storage.Client(project=s.gcp_project_id).bucket(s.dft_bucket)
+
+
+class _PseudoUpload(_BaseModel):
+    filename: str
+    contentB64: str
+
+
+@router.get("/pseudo/list")
+def pseudo_list() -> dict[str, list[dict[str, Any]]]:
+    """List the tenant's uploaded pseudopotential UPFs (GCS ``pseudo/`` prefix)."""
+    try:
+        bucket = _pseudo_bucket()
+        out: list[dict[str, Any]] = []
+        for blob in bucket.list_blobs(prefix=f"{_PSEUDO_PREFIX}/"):
+            name = blob.name[len(_PSEUDO_PREFIX) + 1 :]
+            if name and name.lower().endswith(".upf"):
+                out.append({"filename": name, "element": _element_from_upf_name(name)})
+        out.sort(key=lambda p: p["filename"].lower())
+        return {"pseudos": out}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"pseudo list failed: {str(exc)[:200]}") from exc
+
+
+@router.post("/pseudo/upload")
+def pseudo_upload(req: _PseudoUpload) -> dict[str, Any]:
+    """Upload one .UPF into the tenant's pseudopotential library (GCS ``pseudo/``).
+
+    The entrypoint stages the whole ``pseudo/`` prefix into each run's pseudo_dir,
+    so an uploaded UPF becomes available to pw.x once assigned in ATOMIC_SPECIES.
+    """
+    import base64
+    import binascii
+
+    fn = req.filename.strip().replace("\\", "/").split("/")[-1]
+    if not fn or not fn.lower().endswith(".upf"):
+        raise HTTPException(status_code=400, detail="expected a .UPF filename")
+    try:
+        data = base64.b64decode(req.contentB64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="invalid base64 content") from exc
+    if not data:
+        raise HTTPException(status_code=400, detail="empty file")
+    if len(data) > _MAX_UPF_BYTES:
+        raise HTTPException(status_code=413, detail="UPF exceeds 20 MB")
+    try:
+        blob = _pseudo_bucket().blob(f"{_PSEUDO_PREFIX}/{fn}")
+        blob.upload_from_string(data, content_type="application/octet-stream")
+        return {"filename": fn, "element": _element_from_upf_name(fn), "size": len(data)}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"pseudo upload failed: {str(exc)[:200]}") from exc
+
+
 @router.post("/generate")
 def generate(req: GenerateRequest) -> GenerateResponse:
     """Render ordered QE inputs (.in) for each unit in the workflow DAG (no execution)."""
@@ -147,7 +217,7 @@ def generate(req: GenerateRequest) -> GenerateResponse:
                 text = generate_pw_input(
                     req.structure, params, prefix=req.prefix, ecutwfc=req.ecutwfc,
                     ecutrho=req.ecutrho, functional=req.functional, hubbard=hubbard,
-                    outdir=unit.outdir,
+                    pseudo_map=req.pseudo_map, outdir=unit.outdir,
                 )
             else:
                 text = generate_postproc_input(
