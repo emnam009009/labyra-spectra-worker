@@ -143,6 +143,43 @@ def _element_from_upf_name(name: str) -> str | None:
     return m.group(1) if m else None
 
 
+_UPF_HEADER_BYTES = 131072  # PP_HEADER sits near the top; 128 KB covers PP_INFO
+
+
+def _parse_upf_header(data: bytes) -> dict[str, Any]:
+    """Author-suggested cutoffs + element from a UPF header (v2 XML attributes
+    ``wfc_cutoff``/``rho_cutoff``; v1 'Suggested cutoff for wfc and rho' line).
+    Values are in Ry, as written by the pseudopotential generator."""
+    import re
+
+    text = data.decode("utf-8", errors="ignore")
+    out: dict[str, Any] = {}
+    m = re.search(r"<PP_HEADER([^>]*)/?>", text, re.S)
+    attrs = m.group(1) if m else ""
+    for key, name in (("wfc_cutoff", "ecutwfc"), ("rho_cutoff", "ecutrho")):
+        mm = re.search(rf'{key}\s*=\s*"([^"]+)"', attrs)
+        if mm:
+            try:
+                val = float(mm.group(1))
+            except ValueError:
+                continue
+            if val > 0:
+                out[name] = val
+    me = re.search(r'element\s*=\s*"\s*([A-Za-z]{1,2})\s*"', attrs)
+    if me:
+        out["element"] = me.group(1)
+    if "ecutwfc" not in out:
+        mv = re.search(r"([\d.]+)\s+([\d.]+)\s+Suggested cutoff for wfc and rho", text)
+        if mv:
+            out["ecutwfc"] = float(mv.group(1))
+            out["ecutrho"] = float(mv.group(2))
+    if "element" not in out:
+        mel = re.search(r"^\s*([A-Z][a-z]?)\s+Element\s*$", text, re.M)
+        if mel:
+            out["element"] = mel.group(1)
+    return out
+
+
 def _pseudo_bucket() -> Any:
     from google.cloud import storage
 
@@ -157,14 +194,32 @@ class _PseudoUpload(_BaseModel):
 
 @router.get("/pseudo/list")
 def pseudo_list() -> dict[str, list[dict[str, Any]]]:
-    """List the tenant's uploaded pseudopotential UPFs (GCS ``pseudo/`` prefix)."""
+    """List the tenant's uploaded pseudopotential UPFs (GCS ``pseudo/`` prefix)
+    with author-suggested cutoffs parsed from each file's PP_HEADER."""
     try:
         bucket = _pseudo_bucket()
         out: list[dict[str, Any]] = []
         for blob in bucket.list_blobs(prefix=f"{_PSEUDO_PREFIX}/"):
             name = blob.name[len(_PSEUDO_PREFIX) + 1 :]
-            if name and name.lower().endswith(".upf"):
-                out.append({"filename": name, "element": _element_from_upf_name(name)})
+            if not name or not name.lower().endswith(".upf"):
+                continue
+            info: dict[str, Any] = {
+                "filename": name,
+                "element": _element_from_upf_name(name),
+                "size": blob.size,
+                "ecutwfc": None,
+                "ecutrho": None,
+            }
+            try:
+                head = blob.download_as_bytes(start=0, end=_UPF_HEADER_BYTES - 1)
+                parsed = _parse_upf_header(head)
+                info["ecutwfc"] = parsed.get("ecutwfc")
+                info["ecutrho"] = parsed.get("ecutrho")
+                if parsed.get("element"):
+                    info["element"] = parsed["element"]
+            except Exception:  # noqa: BLE001 — header parse is best-effort
+                pass
+            out.append(info)
         out.sort(key=lambda p: p["filename"].lower())
         return {"pseudos": out}
     except Exception as exc:  # noqa: BLE001
@@ -195,7 +250,14 @@ def pseudo_upload(req: _PseudoUpload) -> dict[str, Any]:
     try:
         blob = _pseudo_bucket().blob(f"{_PSEUDO_PREFIX}/{fn}")
         blob.upload_from_string(data, content_type="application/octet-stream")
-        return {"filename": fn, "element": _element_from_upf_name(fn), "size": len(data)}
+        parsed = _parse_upf_header(data[:_UPF_HEADER_BYTES])
+        return {
+            "filename": fn,
+            "element": parsed.get("element") or _element_from_upf_name(fn),
+            "size": len(data),
+            "ecutwfc": parsed.get("ecutwfc"),
+            "ecutrho": parsed.get("ecutrho"),
+        }
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"pseudo upload failed: {str(exc)[:200]}") from exc
 
