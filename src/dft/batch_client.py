@@ -25,6 +25,7 @@ IAM: service account with roles/batch.jobsEditor (least privilege).
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -45,16 +46,38 @@ MACHINE_PRESETS: dict[str, dict[str, Any]] = {
     # near-bulk on AMD Milan: fits the default 100 C2D_CPUS regional quota (C2 quota is
     # often 8 by default and stalls `bulk` in QUEUED until an increase is granted).
     "bulk-amd-xl": {"vcpu": 56, "cpuMilli": None, "memoryMib": None, "gpu": None, "machineType": "c2d-standard-56"},
+    # largest node inside the default 100-CPUS regional cap: Ice Lake, 384GB RAM —
+    # the RAM headroom matters for large DFT+U slabs; N2_CPUS default quota is generous.
+    "bulk-n2": {"vcpu": 96, "cpuMilli": None, "memoryMib": None, "gpu": None, "machineType": "n2-standard-96"},
     # ⚠ GPU is a knob only: the QE image is CPU-only → GPU sits idle until a CUDA QE build exists.
     "high-gpu": {"vcpu": 8, "cpuMilli": None, "memoryMib": None, "gpu": "nvidia-l4", "machineType": "g2-standard-8"},
 }
 
 
+# Raw machine types accepted alongside named presets: HPC-relevant standard shapes
+# (Cluster-Toolkit-friendly compute-optimized families + N2). vCPU = the name suffix.
+_MACHINE_TYPE_RE = re.compile(r"^(c4d|c3d|c3|c2d|c2|n2)-standard-(\d+)$")
+
+
+def resolve_machine(machine_preset: str) -> dict[str, Any]:
+    """Preset key OR raw '<family>-standard-N' machine type → machine spec dict."""
+    if machine_preset in MACHINE_PRESETS:
+        return MACHINE_PRESETS[machine_preset]
+    m = _MACHINE_TYPE_RE.match(machine_preset)
+    if m:
+        return {
+            "vcpu": int(m.group(2)), "cpuMilli": None, "memoryMib": None,
+            "gpu": None, "machineType": machine_preset,
+        }
+    raise ValueError(
+        f"unknown machine preset {machine_preset!r} "
+        f"(want one of {sorted(MACHINE_PRESETS)} or <family>-standard-N)"
+    )
+
+
 def preset_vcpu(machine_preset: str) -> int:
-    """vCPU count of a preset → default NPROC (MPI ranks)."""
-    if machine_preset not in MACHINE_PRESETS:
-        raise ValueError(f"unknown machine preset {machine_preset!r}")
-    return int(MACHINE_PRESETS[machine_preset]["vcpu"])
+    """vCPU count of a preset/machine type → default NPROC (MPI ranks)."""
+    return int(resolve_machine(machine_preset)["vcpu"])
 
 # Fail (do NOT retry) on hard errors: 1=generic, 137=OOM (SIGKILL), 139=SIGSEGV.
 _FAIL_EXIT_CODES = [1, 137, 139]
@@ -95,11 +118,7 @@ def build_batch_job(
     Pure + schema-validated against ``batch_v1.Job`` in tests. Guardrails baked in:
     maxRunDuration, FAIL_TASK on [1,137,139], maxRetryCount=0, Spot (default).
     """
-    if machine_preset not in MACHINE_PRESETS:
-        raise ValueError(
-            f"unknown machine preset {machine_preset!r} (want one of {sorted(MACHINE_PRESETS)})"
-        )
-    preset = MACHINE_PRESETS[machine_preset]
+    preset = resolve_machine(machine_preset)
 
     container: dict[str, Any] = {"imageUri": image_uri}
     if commands:  # omit for ENTRYPOINT-driven images (QE image reads env, runs entrypoint)
