@@ -14,6 +14,12 @@
 {%- endif %}
     tstress        = {{ p.tstress | qe_bool }},
     tprnfor        = {{ p.tprnfor | qe_bool }},
+{%- if p.tefield %}
+    tefield        = .true.,
+{%- endif %}
+{%- if p.dipfield %}
+    dipfield       = .true.,
+{%- endif %}
 {%- if p.calculation in ['relax', 'vc-relax'] %}
     etot_conv_thr  = {{ p.etotConvThr | default(1e-6) | qe_sci }},
     forc_conv_thr  = {{ p.forcConvThr | default(4.5e-4) | qe_sci }},
@@ -40,9 +46,18 @@
     degauss     = {{ p.degauss | default(0.007) }},
 {%- endif %}
 {%- endif %}
-    nosym       = .false.,
+    nosym       = {{ p.nosym | default(false) | qe_bool }},
     noncolin    = .false.,
     lspinorb    = .false.,
+{%- if p.totCharge %}
+    tot_charge  = {{ p.totCharge }},
+{%- endif %}
+{%- if p.tefield %}
+    edir        = {{ p.edir | default(3) }},
+    emaxpos     = {{ p.emaxpos | default(0.5) }},
+    eopreg      = {{ p.eopreg | default(0.1) }},
+    eamp        = {{ p.eamp | default(0.0) }},
+{%- endif %}
 {%- if p.vdwCorr %}
     vdw_corr    = '{{ p.vdwCorr }}',
 {%- if p.dftd3Version %}
@@ -58,7 +73,7 @@
     mixing_beta      = {{ p.mixingBeta | default(0.2) }},
     diagonalization  = '{{ p.diagonalization | default("david") }}',
     diago_david_ndim = {{ p.diagoDavidNdim | default(8) }},
-    mixing_ndim      = 20,
+    mixing_ndim      = {{ p.mixingNdim | default(20) }},
     mixing_mode      = '{{ p.mixingMode | default("plain") }}',
     diago_full_acc   = {{ p.diagoFullAcc | default(false) | qe_bool }},
 {%- if p.electronMaxstep %}
