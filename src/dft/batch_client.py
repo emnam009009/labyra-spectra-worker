@@ -42,6 +42,9 @@ MACHINE_PRESETS: dict[str, dict[str, Any]] = {
     # fallback if c2 capacity-constrained in the zone (c2 is older-gen; on-demand may stall).
     "bulk-amd": {"vcpu": 16, "cpuMilli": None, "memoryMib": None, "gpu": None, "machineType": "c2d-standard-16"},
     "bulk-large": {"vcpu": 32, "cpuMilli": None, "memoryMib": None, "gpu": None, "machineType": "c2d-standard-32"},
+    # near-bulk on AMD Milan: fits the default 100 C2D_CPUS regional quota (C2 quota is
+    # often 8 by default and stalls `bulk` in QUEUED until an increase is granted).
+    "bulk-amd-xl": {"vcpu": 56, "cpuMilli": None, "memoryMib": None, "gpu": None, "machineType": "c2d-standard-56"},
     # ⚠ GPU is a knob only: the QE image is CPU-only → GPU sits idle until a CUDA QE build exists.
     "high-gpu": {"vcpu": 8, "cpuMilli": None, "memoryMib": None, "gpu": "nvidia-l4", "machineType": "g2-standard-8"},
 }
