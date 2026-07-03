@@ -64,6 +64,10 @@ class DftIO(Protocol):
         """Batch job state name, or 'NOT_FOUND' if the job no longer exists."""
         ...
 
+    def cancel_batch_job(self, job_name: str) -> None:
+        """Request Batch to stop a running/queued job (releases its VM)."""
+        ...
+
     def save(
         self,
         tenant_id: str,
@@ -190,6 +194,51 @@ def reconcile(
         logger.info("dft.reconcile workflow=%s overall=%s changed=%d",
                     workflow_id, overall, len(changed))
     return {"overall": overall, "changed": changed}
+
+
+def cancel(
+    io: DftIO,
+    tenant_id: str,
+    workflow_id: str,
+    *,
+    unit_id: str | None = None,
+) -> dict[str, Any]:
+    """User-initiated stop. With ``unit_id``: cancel that one unit's Batch job and
+    fail it (dependents are stopped via the normal failure propagation). Without:
+    cancel every still-active (queued/running) unit in the workflow.
+
+    Cancelling the Batch job releases its VM immediately; the unit is then marked
+    failed with a 'cancelled by user' reason so the DAG stops rather than waiting
+    on a job that will never report back. Idempotent: an already-terminal unit or a
+    job that has already vanished is skipped without error.
+    """
+    doc = io.load(tenant_id, workflow_id)
+    ws = WorkflowState(doc["units"])
+    if doc.get("snapshot"):
+        ws.load_snapshot(doc["snapshot"])
+
+    snap = ws.snapshot()
+    if unit_id is not None:
+        targets = [unit_id] if snap.get(unit_id, {}).get("status") in ("queued", "running") else []
+    else:
+        targets = [u for u, st in snap.items() if st.get("status") in ("queued", "running")]
+
+    cancelled: list[str] = []
+    for uid in targets:
+        try:
+            io.cancel_batch_job(io.batch_job_name(workflow_id, uid))
+        except Exception as exc:  # noqa: BLE001 — job may already be gone; still fail the unit
+            logger.warning("dft.cancel batch cancel failed unit=%s: %s", uid, exc)
+        ws.mark_failed(uid, "cancelled by user")
+        cancelled.append(uid)
+
+    overall = ws.overall_status()
+    if cancelled:
+        io.save(tenant_id, workflow_id, ws.snapshot(), overall,
+                dict(doc.get("relaxedStructures") or {}), None)
+        logger.info("dft.cancel workflow=%s cancelled=%s overall=%s",
+                    workflow_id, cancelled, overall)
+    return {"overall": overall, "cancelled": cancelled}
 
 
 def _summarize_completed(

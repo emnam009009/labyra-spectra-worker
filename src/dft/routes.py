@@ -332,6 +332,25 @@ def submit_workflow(req: SubmitRequest) -> dict[str, Any]:
     return {"workflowId": req.workflowId, "overallStatus": overall}
 
 
+@router.post("/cancel")
+async def cancel_workflow(request: Request) -> dict[str, Any]:
+    """Stop a running workflow (or a single unit). Cancels the Batch job(s),
+    releasing the VM, and marks the unit(s) failed with a 'cancelled by user'
+    reason so the DAG stops. Body: {tenantId, workflowId, unitId?}."""
+    from src.dft.driver import cancel
+
+    body = await request.json()
+    tenant_id = body.get("tenantId")
+    workflow_id = body.get("workflowId")
+    unit_id = body.get("unitId")
+    if not tenant_id or not workflow_id:
+        raise HTTPException(status_code=422, detail="tenantId and workflowId required")
+    try:
+        return cancel(_dft_io(), tenant_id, workflow_id, unit_id=unit_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"cancel failed: {str(exc)[:200]}") from exc
+
+
 @router.post("/reconcile")
 async def reconcile_workflow(request: Request) -> dict[str, Any]:
     """Actively poll Batch for a workflow's queued/running units and fail any that

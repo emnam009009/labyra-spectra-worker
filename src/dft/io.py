@@ -24,7 +24,7 @@ import logging
 import re
 from typing import Any
 
-from src.dft.batch_client import _QE_BINARY, build_batch_job, get_job_state, preset_vcpu
+from src.dft.batch_client import _QE_BINARY, build_batch_job, cancel_job, get_job_state, preset_vcpu
 from src.dft.errors import FatalError
 from src.dft.generator import generate_postproc_input, generate_pw_input
 
@@ -261,6 +261,10 @@ class FirestoreGcsBatchIO:
             if "not found" in str(exc).lower() or "404" in str(exc):
                 return "NOT_FOUND"
             raise
+
+    def cancel_batch_job(self, job_name: str) -> None:
+        """Request Batch to stop the job (CancelJob → releases its VM)."""
+        cancel_job(job_name)
 
     def read_text(self, path: str) -> str:
         """Download any GCS blob as text (e.g. fildos/filpdos data files, which
