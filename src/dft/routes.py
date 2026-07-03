@@ -202,6 +202,31 @@ def _parse_upf_header(data: bytes) -> dict[str, Any]:
             ptype = "NC"
     if ptype:
         out["pseudoType"] = ptype
+    # Relativistic treatment: scalar (SR) / full (FR) / none (NR).
+    mr = re.search(r'relativistic\s*=\s*"\s*([A-Za-z]+)\s*"', attrs)
+    if mr:
+        out["relativistic"] = {
+            "scalar": "SR",
+            "full": "FR",
+            "no": "NR",
+            "none": "NR",
+        }.get(mr.group(1).lower(), mr.group(1).upper())
+    elif re.search(r"\bfull[ -]?relativistic\b", text[:4000], re.I) or re.search(r"\bfully[ -]?relativistic\b", text[:4000], re.I):
+        out["relativistic"] = "FR"
+    elif re.search(r"\bscalar[ -]?relativistic\b", text[:4000], re.I):
+        out["relativistic"] = "SR"
+    # Nonlinear core correction (semicore contribution to XC).
+    mc = re.search(r'core_correction\s*=\s*"\s*([TF])', attrs)
+    if mc:
+        out["nlcc"] = mc.group(1) == "T"
+    else:
+        mc1 = re.search(r"nonlinear core[- ]correction\s*:?\s*(yes|no|t|f|true|false)", text[:4000], re.I)
+        if mc1:
+            out["nlcc"] = mc1.group(1).lower() in ("yes", "t", "true")
+    # Functional label if present (e.g. PBE, PBESOL) — informational.
+    mf = re.search(r'functional\s*=\s*"\s*([A-Za-z0-9 ]+?)\s*"', attrs)
+    if mf:
+        out["functional"] = mf.group(1).strip().split()[0].upper()
     if "ecutwfc" not in out:
         mv = re.search(r"([\d.]+)\s+([\d.]+)\s+Suggested cutoff for wfc and rho", text)
         if mv:
@@ -245,6 +270,9 @@ def pseudo_list() -> dict[str, list[dict[str, Any]]]:
                 "ecutrho": None,
                 "pseudoType": None,
                 "zValence": None,
+                "relativistic": None,
+                "nlcc": None,
+                "functional": None,
             }
             try:
                 head = blob.download_as_bytes(start=0, end=_UPF_HEADER_BYTES - 1)
@@ -253,6 +281,9 @@ def pseudo_list() -> dict[str, list[dict[str, Any]]]:
                 info["ecutrho"] = parsed.get("ecutrho")
                 info["pseudoType"] = parsed.get("pseudoType")
                 info["zValence"] = parsed.get("zValence")
+                info["relativistic"] = parsed.get("relativistic")
+                info["nlcc"] = parsed.get("nlcc")
+                info["functional"] = parsed.get("functional")
                 if parsed.get("element"):
                     info["element"] = parsed["element"]
             except Exception:  # noqa: BLE001 — header parse is best-effort
@@ -297,6 +328,9 @@ def pseudo_upload(req: _PseudoUpload) -> dict[str, Any]:
             "ecutrho": parsed.get("ecutrho"),
             "pseudoType": parsed.get("pseudoType"),
             "zValence": parsed.get("zValence"),
+            "relativistic": parsed.get("relativistic"),
+            "nlcc": parsed.get("nlcc"),
+            "functional": parsed.get("functional"),
         }
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"pseudo upload failed: {str(exc)[:200]}") from exc
