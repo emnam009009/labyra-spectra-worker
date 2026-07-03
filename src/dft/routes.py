@@ -332,6 +332,25 @@ def submit_workflow(req: SubmitRequest) -> dict[str, Any]:
     return {"workflowId": req.workflowId, "overallStatus": overall}
 
 
+@router.post("/reconcile")
+async def reconcile_workflow(request: Request) -> dict[str, Any]:
+    """Actively poll Batch for a workflow's queued/running units and fail any that
+    are stuck (unprovisionable → quota/capacity) or whose job has vanished. Safe to
+    call repeatedly; intended for a client poll or a periodic Cloud Scheduler sweep.
+    Body: {tenantId, workflowId}."""
+    from src.dft.driver import reconcile
+
+    body = await request.json()
+    tenant_id = body.get("tenantId")
+    workflow_id = body.get("workflowId")
+    if not tenant_id or not workflow_id:
+        raise HTTPException(status_code=422, detail="tenantId and workflowId required")
+    try:
+        return reconcile(_dft_io(), tenant_id, workflow_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"reconcile failed: {str(exc)[:200]}") from exc
+
+
 @router.post("/advance", status_code=status.HTTP_204_NO_CONTENT)
 async def advance_workflow(request: Request) -> None:
     """Pub/Sub push endpoint for Batch job-state-change notifications.

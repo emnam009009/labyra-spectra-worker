@@ -24,7 +24,7 @@ import logging
 import re
 from typing import Any
 
-from src.dft.batch_client import _QE_BINARY, build_batch_job, preset_vcpu
+from src.dft.batch_client import _QE_BINARY, build_batch_job, get_job_state, preset_vcpu
 from src.dft.errors import FatalError
 from src.dft.generator import generate_postproc_input, generate_pw_input
 
@@ -247,6 +247,20 @@ class FirestoreGcsBatchIO:
         path = f"workflows/{workflow_id}/units/{unit_id}/{calc}.out"
         blob = self._storage().bucket(self.bucket).blob(path)
         return blob.download_as_text()
+
+    def batch_job_name(self, workflow_id: str, unit_id: str) -> str:
+        """Fully-qualified Batch job resource name (mirrors launch's job_id)."""
+        job_id = _sanitize_job_id(f"dft-{workflow_id}-{unit_id}")
+        return f"projects/{self.project}/locations/{self.region}/jobs/{job_id}"
+
+    def job_state(self, job_name: str) -> str:
+        """Batch state name; 'NOT_FOUND' when the job has been deleted/expired."""
+        try:
+            return get_job_state(job_name)
+        except Exception as exc:  # noqa: BLE001
+            if "not found" in str(exc).lower() or "404" in str(exc):
+                return "NOT_FOUND"
+            raise
 
     def read_text(self, path: str) -> str:
         """Download any GCS blob as text (e.g. fildos/filpdos data files, which

@@ -58,15 +58,29 @@ if [ -n "${GCS_DEPS:-}" ]; then
 fi
 
 echo "[entrypoint] run: $QE_BINARY ${POOLFLAG[*]:-} -in $QE_IN  (np=$NPROC, omp=$OMP_NUM_THREADS, npool=$NPOOL)"
+# Live monitoring: push the growing .out to GCS every 30s while QE runs, so the
+# app can stream convergence points mid-run (final upload below remains canonical).
 if [ "$(basename "$QE_BINARY")" = "average.x" ]; then
   # average.x reads free-form lines from stdin (not a namelist) — serial is fine.
-  "$QE_BINARY" < "$QE_IN" > "$QE_OUT" 2>&1
+  "$QE_BINARY" < "$QE_IN" > "$QE_OUT" 2>&1 &
 elif [ "$NPROC" -gt 1 ]; then
-  mpirun --allow-run-as-root -np "$NPROC" "$QE_BINARY" ${POOLFLAG[@]+"${POOLFLAG[@]}"} -in "$QE_IN" > "$QE_OUT" 2>&1
+  mpirun --allow-run-as-root -np "$NPROC" "$QE_BINARY" ${POOLFLAG[@]+"${POOLFLAG[@]}"} -in "$QE_IN" > "$QE_OUT" 2>&1 &
 else
-  "$QE_BINARY" ${POOLFLAG[@]+"${POOLFLAG[@]}"} -in "$QE_IN" > "$QE_OUT" 2>&1
+  "$QE_BINARY" ${POOLFLAG[@]+"${POOLFLAG[@]}"} -in "$QE_IN" > "$QE_OUT" 2>&1 &
 fi
-RC=$?
+QE_PID=$!
+(
+  while kill -0 "$QE_PID" 2>/dev/null; do
+    sleep 30
+    [ -s "$QE_OUT" ] && gsutil -q cp "$QE_OUT" "${GCS_WORK%/}/$(basename "$QE_OUT")" 2>/dev/null || true
+  done
+) &
+LIVE_UPLOADER=$!
+wait "$QE_PID"
+QE_RC=$?
+kill "$LIVE_UPLOADER" 2>/dev/null || true
+wait "$LIVE_UPLOADER" 2>/dev/null || true
+RC=$QE_RC
 echo "[entrypoint] QE exit code: $RC"
 
 echo "[entrypoint] uploading $QE_OUT to $GCS_WORK"

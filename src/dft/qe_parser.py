@@ -130,9 +130,14 @@ def parse_scf_summary(text):
 
 
 def parse_convergence(text):
-    """Chuỗi hội tụ cho monitoring: scf accuracy + (energy, force) mỗi ionic step + đã hội tụ?"""
+    """Chuỗi hội tụ cho monitoring: scf accuracy + (energy, force) mỗi ionic step + đã hội tụ?
+    Live-stream-aware: chịu được .out đang chạy dở (partial); `scf_seconds` là mốc
+    'total cpu time spent up to now' của TỪNG iteration (trục thời gian), `job_done`
+    phân biệt file cuối với snapshot giữa chừng."""
     scf_acc = [float(x) for x in re.findall(
         r"estimated scf accuracy\s+<\s+([0-9.eE+-]+)\s+Ry", text)]
+    scf_seconds = [float(x) for x in re.findall(
+        r"total cpu time spent up to now is\s+([\d.]+)\s+secs", text)]
     energies = [float(x) for x in re.findall(
         r"^!\s+total energy\s+=\s+(-?[\d.]+)\s+Ry", text, re.M)]
     forces = [float(x) for x in re.findall(
@@ -143,9 +148,11 @@ def parse_convergence(text):
     converged = bool(bfgs) or ("convergence has been achieved" in text)
     return {
         "scf_accuracy": scf_acc,
+        "scf_seconds": scf_seconds,
         "ionic_steps": ionic,
         "n_ionic_steps": len(ionic),
         "converged": converged,
+        "job_done": "JOB DONE" in text,
         "bfgs_steps": int(bfgs.group(2)) if bfgs else None,
         "final_force": forces[-1] if forces else None,
         "final_scf_accuracy": scf_acc[-1] if scf_acc else None,
