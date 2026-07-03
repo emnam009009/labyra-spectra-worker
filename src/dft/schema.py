@@ -71,3 +71,4 @@ class SubmitRequest(BaseModel):
     machinePreset: str | None = None  # per-workflow VM preset (low/standard/bulk/bulk-large); units may override
     maxRunSec: int | None = None  # per-task timeout cap (fail-fast control knob)
     npool: int | None = None  # k-point parallelization (-npool) for pw.x; speeds dense-k scf/nscf/bands
+    createdBy: str | None = None  # user identity (email) for provenance in the job list

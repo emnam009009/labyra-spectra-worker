@@ -421,7 +421,7 @@ def submit_workflow(req: SubmitRequest) -> dict[str, Any]:
     try:
         io.create_workflow(req.tenantId, req.workflowId, wf,
                            machine_preset=req.machinePreset, max_run_sec=req.maxRunSec,
-                           npool=req.npool)
+                           npool=req.npool, created_by=req.createdBy)
         overall = advance(io, req.tenantId, req.workflowId, None)
     except FatalError as exc:
         raise HTTPException(status_code=400, detail=str(exc)[:300]) from exc

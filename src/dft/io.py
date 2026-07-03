@@ -123,6 +123,7 @@ class FirestoreGcsBatchIO:
         self, tenant_id: str, workflow_id: str, workflow: dict[str, Any],
         *, machine_preset: str | None = None, max_run_sec: int | None = None,
         npool: int | None = None,
+        created_by: str | None = None,
     ) -> None:
         """Persist a new workflow doc (structure/global/units + empty state)."""
         payload: dict[str, Any] = {
@@ -134,6 +135,8 @@ class FirestoreGcsBatchIO:
             "relaxedStructures": "{}",
             "overallStatus": "pending",
         }
+        if created_by:
+            payload["createdBy"] = created_by
         if machine_preset:  # workflow-level VM preset (per-unit can still override)
             payload["machinePreset"] = machine_preset
         if max_run_sec:
