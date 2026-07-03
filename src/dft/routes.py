@@ -169,6 +169,29 @@ def _parse_upf_header(data: bytes) -> dict[str, Any]:
     me = re.search(r'element\s*=\s*"\s*([A-Za-z]{1,2})\s*"', attrs)
     if me:
         out["element"] = me.group(1)
+    # Pseudopotential kind → cutoff-ratio guidance (NC: ecutrho≈4·ecutwfc;
+    # US/PAW: 8–12·ecutwfc). v2 has is_paw/is_ultrasoft/pseudo_type attributes;
+    # v1 spells it in the header text ("Ultrasoft"/"Norm-conserving"/"Projector").
+    ptype = None
+    mt = re.search(r'pseudo_type\s*=\s*"\s*([A-Za-z]+)\s*"', attrs)
+    if mt:
+        raw = mt.group(1).upper()
+        ptype = {"NC": "NC", "SL": "NC", "US": "US", "USPP": "US", "PAW": "PAW"}.get(raw, raw)
+    if ptype is None:
+        if re.search(r'is_paw\s*=\s*"\s*T', attrs):
+            ptype = "PAW"
+        elif re.search(r'is_ultrasoft\s*=\s*"\s*T', attrs):
+            ptype = "US"
+    if ptype is None:
+        low = text[:4000].lower()
+        if "paw" in low or "projector augmented" in low:
+            ptype = "PAW"
+        elif "ultrasoft" in low:
+            ptype = "US"
+        elif "norm-conserving" in low or "norm conserving" in low:
+            ptype = "NC"
+    if ptype:
+        out["pseudoType"] = ptype
     if "ecutwfc" not in out:
         mv = re.search(r"([\d.]+)\s+([\d.]+)\s+Suggested cutoff for wfc and rho", text)
         if mv:
@@ -210,12 +233,14 @@ def pseudo_list() -> dict[str, list[dict[str, Any]]]:
                 "size": blob.size,
                 "ecutwfc": None,
                 "ecutrho": None,
+                "pseudoType": None,
             }
             try:
                 head = blob.download_as_bytes(start=0, end=_UPF_HEADER_BYTES - 1)
                 parsed = _parse_upf_header(head)
                 info["ecutwfc"] = parsed.get("ecutwfc")
                 info["ecutrho"] = parsed.get("ecutrho")
+                info["pseudoType"] = parsed.get("pseudoType")
                 if parsed.get("element"):
                     info["element"] = parsed["element"]
             except Exception:  # noqa: BLE001 — header parse is best-effort
@@ -258,6 +283,7 @@ def pseudo_upload(req: _PseudoUpload) -> dict[str, Any]:
             "size": len(data),
             "ecutwfc": parsed.get("ecutwfc"),
             "ecutrho": parsed.get("ecutrho"),
+            "pseudoType": parsed.get("pseudoType"),
         }
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"pseudo upload failed: {str(exc)[:200]}") from exc
