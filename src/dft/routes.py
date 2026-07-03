@@ -166,6 +166,16 @@ def _parse_upf_header(data: bytes) -> dict[str, Any]:
                 continue
             if val > 0:
                 out[name] = val
+    mz = re.search(r'z_valence\s*=\s*"\s*([\d.eE+-]+)\s*"', attrs)
+    if mz:
+        try:
+            out["zValence"] = float(mz.group(1))
+        except ValueError:
+            pass
+    if "zValence" not in out:
+        mz1 = re.search(r"([\d.]+)\s+Z valence", text)
+        if mz1:
+            out["zValence"] = float(mz1.group(1))
     me = re.search(r'element\s*=\s*"\s*([A-Za-z]{1,2})\s*"', attrs)
     if me:
         out["element"] = me.group(1)
@@ -234,6 +244,7 @@ def pseudo_list() -> dict[str, list[dict[str, Any]]]:
                 "ecutwfc": None,
                 "ecutrho": None,
                 "pseudoType": None,
+                "zValence": None,
             }
             try:
                 head = blob.download_as_bytes(start=0, end=_UPF_HEADER_BYTES - 1)
@@ -241,6 +252,7 @@ def pseudo_list() -> dict[str, list[dict[str, Any]]]:
                 info["ecutwfc"] = parsed.get("ecutwfc")
                 info["ecutrho"] = parsed.get("ecutrho")
                 info["pseudoType"] = parsed.get("pseudoType")
+                info["zValence"] = parsed.get("zValence")
                 if parsed.get("element"):
                     info["element"] = parsed["element"]
             except Exception:  # noqa: BLE001 — header parse is best-effort
@@ -284,9 +296,67 @@ def pseudo_upload(req: _PseudoUpload) -> dict[str, Any]:
             "ecutwfc": parsed.get("ecutwfc"),
             "ecutrho": parsed.get("ecutrho"),
             "pseudoType": parsed.get("pseudoType"),
+            "zValence": parsed.get("zValence"),
         }
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"pseudo upload failed: {str(exc)[:200]}") from exc
+
+
+@router.post("/nbnd-suggest")
+def nbnd_suggest(req: dict[str, Any]) -> dict[str, Any]:
+    """Minimum nbnd from valence electrons for a structure + its assigned UPFs.
+
+    n_electrons = Sum (z_valence of each atom's pseudopotential). For a spin-
+    unpolarised insulator the occupied-band count is n_electrons/2; nbnd is then
+    padded by +15% (a common headroom so a handful of empty bands are available
+    for DOS tails and to avoid the highest band pinning the Fermi search). Spin-
+    polarised runs carry bands in both channels. Returns the inputs so the UI can
+    explain the number. Body: {structure, pseudoMap: {element: filename}, nspin?}.
+    """
+    import math
+
+    structure = req.get("structure") or {}
+    pseudo_map = req.get("pseudoMap") or {}
+    nspin = int(req.get("nspin") or 1)
+    positions = structure.get("atomicPositions") or []
+    if not positions or not pseudo_map:
+        raise HTTPException(status_code=422, detail="structure and pseudoMap required")
+
+    bucket = _pseudo_bucket()
+    z_by_el: dict[str, float] = {}
+    for el, fn in pseudo_map.items():
+        try:
+            head = bucket.blob(f"{_PSEUDO_PREFIX}/{fn}").download_as_bytes(
+                start=0, end=_UPF_HEADER_BYTES - 1
+            )
+            zv = _parse_upf_header(head).get("zValence")
+            if zv:
+                z_by_el[el] = float(zv)
+        except Exception:  # noqa: BLE001
+            pass
+
+    counts: dict[str, int] = {}
+    for a in positions:
+        el = a.get("element")
+        if el:
+            counts[el] = counts.get(el, 0) + 1
+    missing = sorted(set(counts) - set(z_by_el))
+    if missing:
+        raise HTTPException(
+            status_code=422, detail=f"missing z_valence for: {', '.join(missing)}"
+        )
+
+    n_elec = sum(z_by_el[el] * n for el, n in counts.items())
+    n_occ = n_elec if nspin == 2 else n_elec / 2.0
+    nbnd = max(int(math.ceil(n_occ * 1.15)), int(math.ceil(n_occ)) + 4)
+    return {
+        "nElectrons": n_elec,
+        "nOccupied": n_occ,
+        "nbnd": nbnd,
+        "headroomPct": 15,
+        "nspin": nspin,
+        "zValence": z_by_el,
+    }
 
 
 @router.post("/generate")
