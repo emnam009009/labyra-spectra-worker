@@ -266,6 +266,22 @@ class FirestoreGcsBatchIO:
         """Request Batch to stop the job (CancelJob → releases its VM)."""
         cancel_job(job_name)
 
+    def list_running_workflows(self, limit: int = 200) -> list[tuple[str, str]]:
+        """(tenant_id, workflow_id) for every workflow whose overallStatus is
+        'running', across all tenants — a collection-group query over
+        ``dftWorkflows``. Used by the reconcile sweep (Cloud Scheduler)."""
+        fs = self._firestore()
+        out: list[tuple[str, str]] = []
+        q = fs.collection_group("dftWorkflows").where("overallStatus", "==", "running").limit(limit)
+        for doc in q.stream():
+            wid = doc.id
+            # tenants/{tid}/dftWorkflows/{wid} → parent.parent is the tenant doc
+            parent = getattr(getattr(doc.reference, "parent", None), "parent", None)
+            tid = getattr(parent, "id", None)
+            if tid:
+                out.append((tid, wid))
+        return out
+
     def read_text(self, path: str) -> str:
         """Download any GCS blob as text (e.g. fildos/filpdos data files, which
         fetch_output does not cover since it only retrieves the QE .out stdout)."""

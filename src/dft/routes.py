@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, status, Header
 
 from src.config import get_settings
 from src.dft import structure as dft_structure
@@ -330,6 +330,26 @@ def submit_workflow(req: SubmitRequest) -> dict[str, Any]:
     except FatalError as exc:
         raise HTTPException(status_code=400, detail=str(exc)[:300]) from exc
     return {"workflowId": req.workflowId, "overallStatus": overall}
+
+
+@router.post("/reconcile-sweep")
+async def reconcile_sweep(x_cron_secret: str | None = Header(default=None)) -> dict[str, Any]:
+    """Reconcile ALL running workflows (Cloud Scheduler entry point). Guarded by a
+    shared secret in the ``X-Cron-Secret`` header vs ``DFT_CRON_SECRET`` — this
+    endpoint mutates workflows across every tenant and has no user context, so it
+    is refused unless the secret is configured and matches. No secret set → 503
+    (feature disabled), rather than running unprotected."""
+    from src.dft.driver import reconcile_all
+
+    secret = get_settings().dft_cron_secret
+    if not secret:
+        raise HTTPException(status_code=503, detail="reconcile sweep disabled (no DFT_CRON_SECRET)")
+    if x_cron_secret != secret:
+        raise HTTPException(status_code=403, detail="bad or missing X-Cron-Secret")
+    try:
+        return reconcile_all(_dft_io())
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"reconcile sweep failed: {str(exc)[:200]}") from exc
 
 
 @router.post("/cancel")

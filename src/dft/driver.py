@@ -68,6 +68,10 @@ class DftIO(Protocol):
         """Request Batch to stop a running/queued job (releases its VM)."""
         ...
 
+    def list_running_workflows(self, limit: int = 200) -> list[tuple[str, str]]:
+        """(tenant_id, workflow_id) for all workflows with overallStatus 'running'."""
+        ...
+
     def save(
         self,
         tenant_id: str,
@@ -194,6 +198,25 @@ def reconcile(
         logger.info("dft.reconcile workflow=%s overall=%s changed=%d",
                     workflow_id, overall, len(changed))
     return {"overall": overall, "changed": changed}
+
+
+def reconcile_all(io: DftIO, *, now: float | None = None, limit: int = 200) -> dict[str, Any]:
+    """Sweep every running workflow through :func:`reconcile`. Intended for a
+    periodic Cloud Scheduler trigger so stuck/vanished jobs are caught even when
+    no user has the workflow page open. One bad workflow never aborts the sweep."""
+    swept = 0
+    changed_workflows = 0
+    for tenant_id, workflow_id in io.list_running_workflows(limit=limit):
+        swept += 1
+        try:
+            res = reconcile(io, tenant_id, workflow_id, now=now)
+            if res.get("changed"):
+                changed_workflows += 1
+        except Exception as exc:  # noqa: BLE001 — isolate per-workflow failures
+            logger.warning("dft.reconcile_all failed workflow=%s/%s: %s",
+                           tenant_id, workflow_id, exc)
+    logger.info("dft.reconcile_all swept=%d changed=%d", swept, changed_workflows)
+    return {"swept": swept, "changedWorkflows": changed_workflows}
 
 
 def cancel(
