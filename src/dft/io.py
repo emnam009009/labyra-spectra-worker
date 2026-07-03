@@ -205,6 +205,26 @@ class FirestoreGcsBatchIO:
         nproc = self.nproc if self.nproc is not None else max(1, preset_vcpu(preset) // 2)
         max_run = unit.get("maxRunSec") or doc.get("maxRunSec") or self.max_run_sec
         npool = unit.get("npool") or doc.get("npool") or self.npool
+        # Auto-npool: when no explicit override, derive from the irreducible k-point
+        # count (spglib) for pw.x runs — different materials/symmetries need different
+        # pool splits. Postproc binaries ignore -npool, so only compute for pw.x.
+        if npool in (None, 0, 1) and _QE_BINARY.get(calc_type, "pw.x") == "pw.x":
+            try:
+                from src.dft.npool import auto_npool
+
+                g = global_params or {}
+                npool = auto_npool(
+                    structure,
+                    params.get("kPoints"),
+                    nproc=nproc,
+                    ecutrho_ry=float(g.get("ecutrho") or 0.0),
+                    n_atoms=len(structure.get("atomicPositions") or []),
+                    nspin=int(params.get("nspin") or 1),
+                )
+            except Exception as exc:  # noqa: BLE001 — never block submit on this
+                logger.warning("dft.io auto-npool failed unit=%s: %s", unit_id, exc)
+                npool = 1
+        npool = npool or 1
 
         in_text = self._render(calc_type, structure, global_params, params)
         in_name, out_name = f"{calc_type}.in", f"{calc_type}.out"
