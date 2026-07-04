@@ -951,6 +951,30 @@ async def convergence_history(request: Request) -> dict[str, Any]:
 
     try:
         out_text = io.fetch_output(tenant_id, workflow_id, unit["id"])
+    except Exception as exc:  # noqa: BLE001
+        # The .out is not in GCS yet — the job is still QUEUED (no VM), or hasn't
+        # reached its first 30 s streaming flush. That is not an error: return an
+        # empty, not-done convergence so the UI shows "waiting for output" and the
+        # client keeps polling.
+        msg = str(exc).lower()
+        if "no such object" in msg or "not found" in msg or "404" in msg:
+            return {
+                "calcType": calc,
+                "unitId": unit["id"],
+                "pending": True,
+                "job_done": False,
+                "converged": False,
+                "scf_accuracy": [],
+                "scf_seconds": [],
+                "ionic_steps": [],
+                "final_scf_accuracy": None,
+                "walltimeSec": None,
+            }
+        raise HTTPException(
+            status_code=502, detail=f"convergence fetch failed: {str(exc)[:200]}"
+        ) from exc
+
+    try:
         conv = parse_convergence(out_text)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
