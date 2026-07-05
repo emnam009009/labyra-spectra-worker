@@ -8,7 +8,7 @@
     wf_collect     = .false.,
 {%- endif %}
     restart_mode   = '{{ p.restartMode | default("from_scratch") }}',
-    verbosity      = 'high',
+    verbosity      = '{{ p.verbosity | default('high') }}',
 {%- if p.nstep %}
     nstep          = {{ p.nstep }},
 {%- endif %}
@@ -79,8 +79,8 @@
 {%- if p.electronMaxstep %}
     electron_maxstep = {{ p.electronMaxstep }},
 {%- endif %}
-    startingpot      = 'atomic',
-    startingwfc      = 'atomic+random',
+    startingpot      = '{{ p.startingPot | default('atomic') }}',
+    startingwfc      = '{{ p.startingWfc | default('atomic+random') }}',
 /
 {%- if p.calculation in ['relax', 'vc-relax'] %}
 &IONS
@@ -88,8 +88,8 @@
 {%- if p.bfgsNdim %}
     bfgs_ndim        = {{ p.bfgsNdim }},
 {%- endif %}
-    upscale          = 100,
-    trust_radius_max = 0.8,
+    upscale          = {{ p.upscale | default(100) }},
+    trust_radius_max = {{ p.trustRadiusMax | default(0.8) }},
 /
 {%- endif %}
 {%- if p.calculation == 'vc-relax' %}
