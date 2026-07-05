@@ -181,6 +181,15 @@ class FirestoreGcsBatchIO:
             "overallStatus": d.get("overallStatus"),
             "results": d.get("results"),
         }
+        # createdAt (Firestore Timestamp) → epoch seconds, as a last-resort marker
+        # for stuck detection on jobs created before queuedAt was tracked.
+        created = d.get("createdAt")
+        if created is not None:
+            ts = getattr(created, "timestamp", None)
+            if callable(ts):
+                doc["createdAtEpoch"] = created.timestamp()
+            elif isinstance(created, (int, float)):
+                doc["createdAtEpoch"] = float(created)
         self._cache[(tenant_id, workflow_id)] = doc
         return doc
 

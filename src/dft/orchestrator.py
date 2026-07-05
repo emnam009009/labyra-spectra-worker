@@ -38,6 +38,7 @@ _RELAX_CALCS = {"relax", "vc-relax"}
 @dataclass
 class UnitState:
     status: str = PENDING
+    queued_at: float | None = None
     started_at: float | None = None
     finished_at: float | None = None
     error_message: str | None = None
@@ -120,7 +121,9 @@ class WorkflowState:
         return out
 
     def mark_queued(self, uid: str) -> None:
-        self.states[uid].status = QUEUED
+        st = self.states[uid]
+        st.status = QUEUED
+        st.queued_at = self._now()
 
     def mark_running(self, uid: str) -> None:
         st = self.states[uid]
@@ -176,6 +179,7 @@ class WorkflowState:
         return {
             uid: {
                 "status": s.status,
+                "queuedAt": s.queued_at,
                 "startedAt": s.started_at,
                 "finishedAt": s.finished_at,
                 "errorMessage": s.error_message,
@@ -188,6 +192,7 @@ class WorkflowState:
             if uid in self.states:
                 self.states[uid] = UnitState(
                     status=s.get("status", PENDING),
+                    queued_at=s.get("queuedAt"),
                     started_at=s.get("startedAt"),
                     finished_at=s.get("finishedAt"),
                     error_message=s.get("errorMessage"),

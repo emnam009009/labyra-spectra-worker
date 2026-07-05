@@ -179,9 +179,15 @@ def reconcile(
             ws.mark_failed(uid, f"Batch job for unit {uid!r} no longer exists (deleted or expired).")
             changed.append({"unitId": uid, "state": "FAILED", "reason": "job vanished"})
         elif state in ("QUEUED", "SCHEDULED"):
-            started = snap.get(uid, {}).get("startedAt")
-            if started and (now - float(started)) > _STUCK_QUEUED_SECONDS:
-                mins = int((now - float(started)) / 60)
+            # A unit stuck in QUEUED never reaches RUNNING, so startedAt is null —
+            # measure from queuedAt (set when the Batch job was submitted). Fall
+            # back to startedAt, then to the workflow createdAt, so pre-existing
+            # jobs from before queuedAt was tracked are still caught rather than
+            # spinning forever.
+            snap_u = snap.get(uid, {})
+            marker = snap_u.get("queuedAt") or snap_u.get("startedAt") or doc.get("createdAtEpoch")
+            if marker and (now - float(marker)) > _STUCK_QUEUED_SECONDS:
+                mins = int((now - float(marker)) / 60)
                 ws.mark_failed(
                     uid,
                     f"Stuck in QUEUED for ~{mins} min — the machine could not be provisioned "
