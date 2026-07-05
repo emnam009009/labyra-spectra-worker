@@ -517,6 +517,10 @@ class MaterialSearchRequest(_BaseModel):
     limit: _Optional[int] = 30
 
 
+class MpSummaryRequest(_BaseModel):
+    mpId: str
+
+
 @app.post("/materials/sync")
 async def sync_materials(req: MaterialSyncRequest, request: Request) -> dict:
     """
@@ -577,6 +581,24 @@ async def search_materials_endpoint(req: MaterialSearchRequest, request: Request
     limit = max(1, min(req.limit or 30, 100))
     results = search_materials(q, settings.mp_api_key, limit)
     return {"query": q, "count": len(results), "results": results}
+
+
+@app.post("/materials/summary")
+async def material_summary_endpoint(req: MpSummaryRequest) -> dict:
+    """MP summary (band gap, hull, formation energy, magnetic ordering, …) for one
+    material_id, for the structure-detail panel. POST {"mpId": "mp-224"}."""
+    from src.materials.mp_sync import structure_mp_summary
+
+    settings = get_settings()
+    if not settings.mp_api_key:
+        return {"error": "MP_API_KEY not configured"}
+    mp_id = (req.mpId or "").strip()
+    if not mp_id:
+        return {"error": "mpId required"}
+    summary = structure_mp_summary(mp_id, settings.mp_api_key)
+    if summary is None:
+        return {"error": "not found", "mpId": mp_id}
+    return summary
 
 
 @app.get("/materials/cache-stats")

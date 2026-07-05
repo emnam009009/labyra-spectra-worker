@@ -369,3 +369,58 @@ def search_materials(query: str, api_key: str, limit: int = 30) -> list[dict[str
 
     docs_sorted = sorted(docs, key=sort_key)[:limit]
     return [_doc_to_search_result(d) for d in docs_sorted]
+
+
+_STRUCT_SUMMARY_FIELDS = [
+    "material_id",
+    "band_gap",
+    "is_gap_direct",
+    "energy_above_hull",
+    "formation_energy_per_atom",
+    "is_stable",
+    "ordering",
+    "total_magnetization",
+    "theoretical",
+    "density",
+]
+
+
+def structure_mp_summary(mp_id: str, api_key: str) -> dict[str, Any] | None:
+    """MP summary for the structure-detail panel (band gap, hull, formation
+    energy, magnetic ordering, …). Exact material_id lookup; None if not found."""
+    try:
+        from mp_api.client import MPRester  # type: ignore[import]
+    except ImportError:
+        logger.error("mp_api not installed")
+        return None
+
+    try:
+        with MPRester(api_key) as mpr:
+            docs = mpr.summary.search(
+                material_ids=[mp_id], fields=_STRUCT_SUMMARY_FIELDS
+            )
+    except Exception:
+        logger.exception("MP structure_mp_summary failed: %s", mp_id)
+        return None
+
+    if not docs:
+        return None
+
+    d = docs[0]
+
+    def _r(key: str, ndigits: int) -> float | None:
+        v = getattr(d, key, None)
+        return round(float(v), ndigits) if v is not None else None
+
+    return {
+        "mpId": mp_id,
+        "bandGap": _r("band_gap", 3),
+        "isGapDirect": getattr(d, "is_gap_direct", None),
+        "energyAboveHull": _r("energy_above_hull", 4),
+        "formationEnergyPerAtom": _r("formation_energy_per_atom", 4),
+        "isStable": getattr(d, "is_stable", None),
+        "ordering": getattr(d, "ordering", None),
+        "totalMagnetization": _r("total_magnetization", 3),
+        "theoretical": getattr(d, "theoretical", None),
+        "density": _r("density", 3),
+    }
