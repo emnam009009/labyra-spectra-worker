@@ -139,3 +139,130 @@ def export_structure(structure: dict[str, Any], fmt: str) -> str:
     if pmg_fmt is None:
         raise ValueError(f"unsupported export format: {fmt}")
     return str(struct.to(fmt=pmg_fmt))
+
+
+def analyze_structure(structure: dict[str, Any]) -> dict[str, Any]:
+    """Full crystallographic summary for the structure detail panel, MP-style:
+    conventional-lattice parameters, symmetry (Hall / international / point group /
+    crystal + lattice system), Wyckoff positions, density, dimensionality and
+    guessed oxidation states. Each block is best-effort — a failure in one (e.g.
+    oxidation guessing) degrades to null rather than failing the whole response.
+    """
+    from pymatgen.symmetry.analyzer import SpacegroupAnalyzer  # type: ignore[import]
+
+    struct = _reconstruct(structure)
+    out: dict[str, Any] = {
+        "nsites": len(struct),
+        "density": None,
+        "lattice": None,
+        "symmetry": None,
+        "wyckoff": [],
+        "dimensionality": None,
+        "oxidationStates": [],
+    }
+
+    try:
+        out["density"] = round(float(struct.density), 3)
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Symmetry + conventional lattice + Wyckoff via spglib (through pymatgen).
+    try:
+        sga = SpacegroupAnalyzer(struct, symprec=1e-3, angle_tolerance=5.0)
+        conv = sga.get_conventional_standard_structure()
+        latt = conv.lattice
+        out["lattice"] = {
+            "a": round(latt.a, 4),
+            "b": round(latt.b, 4),
+            "c": round(latt.c, 4),
+            "alpha": round(latt.alpha, 2),
+            "beta": round(latt.beta, 2),
+            "gamma": round(latt.gamma, 2),
+            "volume": round(latt.volume, 2),
+        }
+        ds = sga.get_symmetry_dataset()
+
+        def _g(obj: Any, key: str) -> Any:
+            # pymatgen ≥2024 returns a dataclass; older returns a dict.
+            return getattr(obj, key, None) if not isinstance(obj, dict) else obj.get(key)
+
+        out["symmetry"] = {
+            "crystalSystem": sga.get_crystal_system(),
+            "latticeSystem": sga.get_lattice_type(),
+            "hallNumber": _g(ds, "hall_number"),
+            "hallSymbol": _g(ds, "hall"),
+            "internationalNumber": _g(ds, "number"),
+            "internationalSymbol": _g(ds, "international")
+            or sga.get_space_group_symbol(),
+            "pointGroup": sga.get_point_group_symbol(),
+        }
+
+        # Wyckoff positions: element + multiplicity/letter + representative frac coords.
+        try:
+            sym_struct = sga.get_symmetrized_structure()
+            wyckoff: list[dict[str, Any]] = []
+            for eq_sites, wsym in zip(
+                sym_struct.equivalent_sites, sym_struct.wyckoff_symbols
+            ):
+                site = eq_sites[0]
+                wyckoff.append(
+                    {
+                        "label": wsym,
+                        "element": site.specie.symbol
+                        if hasattr(site.specie, "symbol")
+                        else str(site.specie),
+                        "x": _frac(site.frac_coords[0]),
+                        "y": _frac(site.frac_coords[1]),
+                        "z": _frac(site.frac_coords[2]),
+                    }
+                )
+            out["wyckoff"] = wyckoff
+        except Exception:  # noqa: BLE001
+            pass
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Dimensionality (Larsen bonding-graph method).
+    try:
+        from pymatgen.analysis.dimensionality import (  # type: ignore[import]
+            get_dimensionality_larsen,
+        )
+        from pymatgen.analysis.local_env import CrystalNN  # type: ignore[import]
+
+        bonded = CrystalNN().get_bonded_structure(struct)
+        dim = get_dimensionality_larsen(bonded)
+        out["dimensionality"] = (
+            "2D or Layered" if dim == 2 else f"{dim}D" if dim is not None else None
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Guessed oxidation states → list of "El{charge}±" strings.
+    try:
+        guesses = struct.composition.oxi_state_guesses()
+        if guesses:
+            best = guesses[0]
+            out["oxidationStates"] = [
+                f"{el}{_ox(chg)}" for el, chg in sorted(best.items())
+            ]
+    except Exception:  # noqa: BLE001
+        pass
+
+    return out
+
+
+def _frac(v: float) -> str:
+    """Format a fractional coordinate, showing exact thirds/quarters as fractions."""
+    from fractions import Fraction
+
+    fr = Fraction(float(v)).limit_denominator(12)
+    if abs(float(fr) - float(v)) < 1e-3 and fr.denominator != 1:
+        return f"{fr.numerator}/{fr.denominator}"
+    return f"{float(v):.5g}"
+
+
+def _ox(charge: float) -> str:
+    n = int(round(charge))
+    if n == 0:
+        return "0"
+    return f"{abs(n)}{'+' if n > 0 else '-'}"

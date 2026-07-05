@@ -22,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Request, status, Header
 from src.config import get_settings
 from src.dft import structure as dft_structure
 from src.dft.generator import generate_postproc_input, generate_pw_input
-from src.dft.scene import build_scene, export_structure
+from src.dft.scene import analyze_structure, build_scene, export_structure
 from pydantic import BaseModel as _BaseModel
 from src.dft.batch_client import get_job_labels
 from src.dft.driver import advance
@@ -94,6 +94,18 @@ def structure_scene(req: _SceneRequest) -> dict[str, Any]:
     """Reconstruct a stored DftStructure → render scene (atoms + CrystalNN bonds)."""
     try:
         return build_scene(req.structure)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)[:300]) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)[:300]) from exc
+
+
+@router.post("/structure/analysis")
+def structure_analysis(req: _SceneRequest) -> dict[str, Any]:
+    """Full crystallographic summary (symmetry, Wyckoff, density, oxidation, …)
+    for the structure detail panel."""
+    try:
+        return analyze_structure(req.structure)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)[:300]) from exc
     except Exception as exc:  # noqa: BLE001
