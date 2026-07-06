@@ -86,7 +86,11 @@ _FAIL_EXIT_CODES = [1, 137, 139]
 _QE_BINARY: dict[str, str] = {
     "vc-relax": "pw.x", "relax": "pw.x", "scf": "pw.x", "nscf": "pw.x", "bands": "pw.x",
     "ppbands": "bands.x", "dos": "dos.x", "pdos": "projwfc.x", "charge": "pp.x",
+    "ph": "ph.x", "q2r": "q2r.x", "matdyn": "matdyn.x",
 }
+
+# q2r.x / matdyn.x read their namelist from standard input, not via -in.
+_STDIN_BINARY = {"q2r", "matdyn"}
 
 
 def qe_command(calc_type: str, in_file: str, out_file: str | None = None) -> list[str]:
@@ -95,6 +99,9 @@ def qe_command(calc_type: str, in_file: str, out_file: str | None = None) -> lis
     binary = _QE_BINARY.get(calc_type)
     if binary is None:
         raise ValueError(f"no QE binary for calc type {calc_type!r}")
+    if calc_type in _STDIN_BINARY:
+        redirect = f"> {out_file} 2>&1" if out_file else ""
+        return ["bash", "-c", f"{binary} < {in_file} {redirect}".rstrip()]
     if out_file:
         return ["bash", "-c", f"{binary} -in {in_file} > {out_file} 2>&1"]
     return [binary, "-in", in_file]

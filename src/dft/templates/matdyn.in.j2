@@ -1,0 +1,9 @@
+&INPUT
+    flfrc = '{{ wf.prefix }}.fc',
+    asr   = '{{ p.asr | default("crystal") }}',
+    dos   = {{ p.dos | default(true) | qe_bool }},
+    nk1   = {{ p.nk1 | default(4) }},
+    nk2   = {{ p.nk2 | default(4) }},
+    nk3   = {{ p.nk3 | default(4) }},
+    fldos = '{{ wf.prefix }}.phdos',
+/

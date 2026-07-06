@@ -33,6 +33,9 @@ _POSTPROC_TEMPLATE: dict[str, str] = {
     "pdos": "projwfc.in.j2",   # projwfc.x — projected DOS / LDOS
     "charge": "pp.in.j2",      # pp.x    — charge density / STM (plot_num),
     "avgpot": "average.in.j2",
+    "ph": "ph.in.j2",          # ph.x     — DFPT dynamical matrices
+    "q2r": "q2r.in.j2",        # q2r.x    — real-space interatomic force constants
+    "matdyn": "matdyn.in.j2",  # matdyn.x — phonon dispersion / DOS
 }
 
 

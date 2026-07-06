@@ -30,7 +30,7 @@ from src.dft.generator import generate_postproc_input, generate_pw_input
 
 logger = logging.getLogger(__name__)
 
-_POSTPROC = {"ppbands", "dos", "pdos", "charge", "avgpot"}
+_POSTPROC = {"ppbands", "dos", "pdos", "charge", "avgpot", "ph", "q2r", "matdyn"}
 _STAGED_OUTDIR = "./out"  # MUST match entrypoint.sh staging dir
 
 

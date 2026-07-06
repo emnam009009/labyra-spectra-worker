@@ -1,0 +1,12 @@
+phonons {{ wf.prefix }}
+&INPUTPH
+    prefix   = '{{ wf.prefix }}',
+    outdir   = '{{ unit.outdir }}',
+    fildyn   = '{{ wf.prefix }}.dyn',
+    ldisp    = {{ p.ldisp | default(true) | qe_bool }},
+    nq1      = {{ p.nq1 | default(2) }},
+    nq2      = {{ p.nq2 | default(2) }},
+    nq3      = {{ p.nq3 | default(2) }},
+    tr2_ph   = {{ p.tr2_ph | default(1e-14) | qe_sci }},
+    epsil    = {{ p.epsil | default(false) | qe_bool }},
+/
