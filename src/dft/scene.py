@@ -266,3 +266,50 @@ def _ox(charge: float) -> str:
     if n == 0:
         return "0"
     return f"{abs(n)}{'+' if n > 0 else '-'}"
+
+
+def brillouin_zone(structure: dict[str, Any]) -> dict[str, Any]:
+    """First Brillouin zone + high-symmetry k-points + band path, for the
+    reciprocal-space viewer.
+
+    seekpath standardizes the primitive cell and gives the high-symmetry point
+    coordinates (fractional, reciprocal) and the path; pymatgen builds the BZ
+    facets. Both use the SAME reciprocal lattice (of seekpath's primitive cell)
+    so the facets and points share one 2π convention and align.
+
+    Returns:
+      facets      : [[[x, y, z], ...], ...] BZ faces (Cartesian reciprocal)
+      points      : {label: [x, y, z]} high-symmetry points (Cartesian reciprocal)
+      segments    : [[labelA, labelB], ...] band-path segments
+      reciprocal  : 3x3 reciprocal-lattice matrix (rows = b1, b2, b3)
+    """
+    import seekpath  # type: ignore[import]
+    from pymatgen.core import Lattice  # type: ignore[import]
+
+    struct = _reconstruct(structure)
+    cell = (
+        struct.lattice.matrix.tolist(),
+        [site.frac_coords.tolist() for site in struct],
+        [site.specie.Z for site in struct],
+    )
+    res = seekpath.get_path(cell)
+    prim = np.array(res["primitive_lattice"])
+    recip = Lattice(prim).reciprocal_lattice
+    rmat = np.array(recip.matrix)
+
+    facets = [
+        [[float(x) for x in vert] for vert in face]
+        for face in recip.get_brillouin_zone()
+    ]
+    points = {
+        label: (np.asarray(frac, dtype=float) @ rmat).tolist()
+        for label, frac in res["point_coords"].items()
+    }
+    segments = [[a, b] for a, b in res["path"]]
+
+    return {
+        "facets": facets,
+        "points": points,
+        "segments": segments,
+        "reciprocal": rmat.tolist(),
+    }
