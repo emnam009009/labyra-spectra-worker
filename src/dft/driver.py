@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from src.dft.orchestrator import WorkflowState, is_relax, relaxed_structure_from_out
@@ -84,6 +85,47 @@ class DftIO(Protocol):
         ...
 
 
+def _notify_job_done(
+    io: DftIO, tenant_id: str, workflow_id: str, doc: dict[str, Any], overall: str
+) -> None:
+    """Write a notification to the workflow owner's inbox on a terminal transition.
+
+    Best-effort: a failure here must never break the DAG. Skips workflows with no
+    ``createdByUid`` (older ones, submitted before the app started sending it).
+    Path mirrors the app: tenants/{tid}/userNotifications/{uid}/items.
+    """
+    uid = doc.get("createdByUid")
+    if not uid:
+        return
+    try:
+        prefix = (doc.get("global") or {}).get("prefix") or workflow_id
+        if overall == "completed":
+            title, body = "DFT job hoàn thành", f"{prefix} đã tính xong."
+        else:
+            title, body = "DFT job thất bại", f"{prefix} kết thúc với lỗi."
+        fs = io._firestore()  # type: ignore[attr-defined]
+        (
+            fs.collection("tenants").document(tenant_id)
+            .collection("userNotifications").document(uid)
+            .collection("items")
+            .add(
+                {
+                    "title": title,
+                    "body": body,
+                    "status": "unread",
+                    "createdAt": datetime.now(UTC).isoformat(),
+                    "href": f"/dashboard/computation/{workflow_id}",
+                    "type": "dft",
+                }
+            )
+        )
+        logger.info(
+            "dft.advance notified owner=%s workflow=%s overall=%s", uid, workflow_id, overall
+        )
+    except Exception as exc:  # noqa: BLE001 — notification must never break the DAG
+        logger.warning("dft.advance notify failed workflow=%s: %s", workflow_id, exc)
+
+
 def advance(
     io: DftIO,
     tenant_id: str,
@@ -126,8 +168,11 @@ def advance(
             )
         except Exception as exc:  # noqa: BLE001 — results extraction must not break the DAG
             logger.warning("dft.advance summarize failed workflow=%s: %s", workflow_id, exc)
+    prev_overall = doc.get("overallStatus")
     io.save(tenant_id, workflow_id, ws.snapshot(), overall, relaxed, results)
     logger.info("dft.advance workflow=%s overall=%s", workflow_id, overall)
+    if overall in ("completed", "failed") and prev_overall not in ("completed", "failed"):
+        _notify_job_done(io, tenant_id, workflow_id, doc, overall)
     return overall
 
 

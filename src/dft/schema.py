@@ -72,3 +72,4 @@ class SubmitRequest(BaseModel):
     maxRunSec: int | None = None  # per-task timeout cap (fail-fast control knob)
     npool: int | None = None  # k-point parallelization (-npool) for pw.x; speeds dense-k scf/nscf/bands
     createdBy: str | None = None  # user identity (email) for provenance in the job list
+    createdByUid: str | None = None  # Firebase Auth uid, for job-done notifications
