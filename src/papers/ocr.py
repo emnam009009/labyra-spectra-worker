@@ -23,10 +23,10 @@ from mistralai.client.sdk import Mistral  # type: ignore[import-untyped]
 from src.config import get_settings
 from src.gcs_client import blob_exists, download_bytes, upload_bytes
 from src.papers.errors import FatalError, RetryableError
-from src.papers.ocr_datalab import datalab_ocr
+from src.papers.ocr_datalab import RawFigure, datalab_ocr
 from src.papers.pricing import datalab_ocr_cost_usd, mistral_ocr_cost_usd
 from src.papers.state import check_cancelled, increment_cost, update_status
-from src.papers.types import OcrPage, OcrResult
+from src.papers.types import OcrFigure, OcrPage, OcrResult
 
 logger = logging.getLogger(__name__)
 
@@ -121,28 +121,30 @@ def _mistral_ocr(pdf_bytes: bytes) -> list[OcrPage]:
     return pages
 
 
-def _run_ocr_engine(pdf_bytes: bytes) -> tuple[list[OcrPage], str]:
+def _run_ocr_engine(pdf_bytes: bytes) -> tuple[list[OcrPage], str, list[RawFigure]]:
     """Dispatch to the configured OCR engine with optional fallback.
 
-    Returns (pages, engine_used). FatalError (e.g. bad key) is never silently
-    swallowed; only transient failures fall back when ocr_fallback is set.
+    Returns (pages, engine_used, figures). FatalError (e.g. bad key) is never
+    silently swallowed; only transient failures fall back when ocr_fallback is set.
+    Only Datalab yields figures; Mistral returns an empty list.
     """
     settings = get_settings()
     engine = (settings.ocr_engine or "mistral").strip().lower()
 
     if engine == "datalab":
         try:
-            return datalab_ocr(pdf_bytes), "datalab"
+            pages, figures = datalab_ocr(pdf_bytes)
+            return pages, "datalab", figures
         except FatalError:
             raise
         except Exception as exc:
             fallback = (settings.ocr_fallback or "").strip().lower()
             if fallback == "mistral":
                 logger.error("ocr_datalab_failed_fallback_mistral err=%s", exc)
-                return _mistral_ocr(pdf_bytes), "mistral"
+                return _mistral_ocr(pdf_bytes), "mistral", []
             raise RetryableError(f"Datalab OCR failed (no fallback): {exc}") from exc
 
-    return _mistral_ocr(pdf_bytes), "mistral"
+    return _mistral_ocr(pdf_bytes), "mistral", []
 
 
 def _engine_cost_usd(engine: str, page_count: int) -> float:
@@ -150,6 +152,27 @@ def _engine_cost_usd(engine: str, page_count: int) -> float:
     if engine == "datalab":
         return datalab_ocr_cost_usd(page_count)
     return mistral_ocr_cost_usd(page_count)
+
+
+def _upload_figures(
+    tenant_id: str, paper_id: str, raw_figures: list[RawFigure]
+) -> list[OcrFigure]:
+    """Upload each figure to storage; return light metadata (name/page/path).
+
+    Best-effort: a single figure failure is logged and skipped, never raised.
+    """
+    stored: list[OcrFigure] = []
+    for fig in raw_figures:
+        path = f"tenants/{tenant_id}/papers/{paper_id}/figures/{fig.name}"
+        try:
+            upload_bytes(path, fig.data, content_type=fig.mime_type)
+        except Exception as exc:
+            logger.warning("ocr_figure_upload_failed name=%s err=%s", fig.name, exc)
+            continue
+        stored.append(
+            OcrFigure(name=fig.name, page=fig.page, mime_type=fig.mime_type, storage_path=path)
+        )
+    return stored
 
 
 def run_ocr_step(
@@ -198,9 +221,15 @@ def run_ocr_step(
     cached = _try_load_cache(pdf_hash)
     if cached is not None:
         with contextlib.suppress(Exception):
-            db.document(f"tenants/{tenant_id}/papers/{paper_id}").update(
-                {"pageCount": cached.page_count, "ocrCacheHit": True, "ocrContentHash": pdf_hash}
-            )
+            cache_fields: dict[str, object] = {
+                "pageCount": cached.page_count,
+                "ocrCacheHit": True,
+                "ocrContentHash": pdf_hash,
+            }
+            if cached.figures:
+                cache_fields["figures"] = [f.model_dump(by_alias=True) for f in cached.figures]
+                cache_fields["figureCount"] = len(cached.figures)
+            db.document(f"tenants/{tenant_id}/papers/{paper_id}").update(cache_fields)
         elapsed_ms = int((time.monotonic() - started_at) * 1000)
         logger.info(
             "ocr_step_done tenant=%s paper=%s elapsed_ms=%d pages=%d cost_usd=0.0000 cache=hit",
@@ -209,7 +238,7 @@ def run_ocr_step(
         return cached
 
     # ── OCR engine dispatch (R221) ──
-    pages, engine_used = _run_ocr_engine(pdf_bytes)
+    pages, engine_used, raw_figures = _run_ocr_engine(pdf_bytes)
 
     check_cancelled(db, tenant_id, paper_id)
 
@@ -219,12 +248,19 @@ def run_ocr_step(
     cost_usd = _engine_cost_usd(engine_used, page_count)
     latency_ms = int((time.monotonic() - started_at) * 1000)
 
+    # Upload extracted figures + collect light metadata (best-effort).
+    stored_figures = _upload_figures(tenant_id, paper_id, raw_figures)
+
     increment_cost(db, tenant_id, paper_id, "ocr", cost_usd)
-    db.document(f"tenants/{tenant_id}/papers/{paper_id}").update({"pageCount": page_count})
+    ocr_fields: dict[str, object] = {"pageCount": page_count}
+    if stored_figures:
+        ocr_fields["figures"] = [f.model_dump(by_alias=True) for f in stored_figures]
+        ocr_fields["figureCount"] = len(stored_figures)
+    db.document(f"tenants/{tenant_id}/papers/{paper_id}").update(ocr_fields)
 
     logger.info(
-        "ocr_done tenant=%s paper=%s engine=%s pages=%d cost_usd=%.6f latency_ms=%d",
-        tenant_id, paper_id, engine_used, page_count, cost_usd, latency_ms,
+        "ocr_done tenant=%s paper=%s engine=%s pages=%d figures=%d cost_usd=%.6f latency_ms=%d",
+        tenant_id, paper_id, engine_used, page_count, len(stored_figures), cost_usd, latency_ms,
     )
 
     result = OcrResult(
@@ -232,6 +268,7 @@ def run_ocr_step(
         pages=pages,
         pageCount=page_count,
         costUsd=cost_usd,
+        figures=stored_figures,
     )
     _save_cache(pdf_hash, result)
     with contextlib.suppress(Exception):

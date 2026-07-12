@@ -16,15 +16,47 @@ Config (src/config.py Settings):
 """
 from __future__ import annotations
 
+import base64
 import logging
 import re
 import time
+from typing import NamedTuple
 
 import httpx
 
 from src.config import get_settings
 from src.papers.errors import FatalError, RetryableError
 from src.papers.types import OcrPage
+
+
+class RawFigure(NamedTuple):
+    """A figure decoded from the OCR response, ready to upload to storage."""
+
+    name: str
+    page: int
+    mime_type: str
+    data: bytes
+
+
+_FIG_REF_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+
+
+def _build_raw_figures(pages: list[OcrPage], images: dict[str, str]) -> list[RawFigure]:
+    """Decode Marker's {name: base64} images and map each to the page that
+    references it in the paginated markdown. Best-effort — bad entries skipped."""
+    page_of: dict[str, int] = {}
+    for pg in pages:
+        for match in _FIG_REF_RE.finditer(pg.text):
+            page_of.setdefault(match.group(1).strip(), pg.page_number)
+    figures: list[RawFigure] = []
+    for name, b64 in images.items():
+        try:
+            data = base64.b64decode(b64)
+        except (ValueError, TypeError):
+            continue
+        mime = "image/png" if name.lower().endswith(".png") else "image/jpeg"
+        figures.append(RawFigure(name=name, page=page_of.get(name, 0), mime_type=mime, data=data))
+    return figures
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +88,8 @@ def _split_pages(markdown: str) -> list[OcrPage]:
     return pages
 
 
-def datalab_ocr(pdf_bytes: bytes) -> list[OcrPage]:
-    """Run Datalab Marker OCR on PDF bytes. Returns per-page OcrPage list.
+def datalab_ocr(pdf_bytes: bytes) -> tuple[list[OcrPage], list[RawFigure]]:
+    """Run Datalab Marker OCR on PDF bytes. Returns (pages, figures).
 
     Raises:
         FatalError: missing/invalid API key (401).
@@ -113,7 +145,9 @@ def datalab_ocr(pdf_bytes: bytes) -> list[OcrPage]:
                     f"Datalab conversion failed: {result.get('error') or 'unknown'}"
                 )
             pages = _split_pages(result.get("markdown") or "")
-            logger.info("datalab_ocr_done pages=%d", len(pages))
-            return pages
+            images = result.get("images")
+            figures = _build_raw_figures(pages, images) if isinstance(images, dict) else []
+            logger.info("datalab_ocr_done pages=%d figures=%d", len(pages), len(figures))
+            return pages, figures
 
     raise RetryableError(f"Datalab timed out after {int(_MAX_POLLS * _POLL_INTERVAL_S)}s")

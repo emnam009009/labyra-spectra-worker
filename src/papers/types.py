@@ -244,6 +244,17 @@ class OcrPage(BaseModel):
     text: str = ""
 
 
+class OcrFigure(BaseModel):
+    """A figure/image extracted from the document (Datalab Marker)."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    name: str
+    page: int = Field(default=0, ge=0)
+    mime_type: str = Field(alias="mimeType", default="image/jpeg")
+    storage_path: str = Field(alias="storagePath", default="")
+
+
 class OcrResult(BaseModel):
     """Full OCR result from Mistral provider."""
 
@@ -253,6 +264,7 @@ class OcrResult(BaseModel):
     pages: list[OcrPage] = Field(default_factory=list)
     page_count: int = Field(alias="pageCount", ge=0)
     cost_usd: float = Field(alias="costUsd", ge=0.0)
+    figures: list[OcrFigure] = Field(default_factory=list)
 
 
 class Chunk(BaseModel):
