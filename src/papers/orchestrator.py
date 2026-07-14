@@ -22,13 +22,12 @@ from src.papers.citation import run_citation_step
 from src.papers.embed import run_embed_step
 from src.papers.enrich import run_enrich_step
 from src.papers.errors import CancelledError, FatalError, RetryableError
-from src.papers.index import run_index_step
 from src.papers.google_books import lookup_book_isbn, search_book_by_title
+from src.papers.index import run_index_step
 from src.papers.metadata import extract_metadata
 from src.papers.ocr import run_ocr_step
 from src.papers.pretranslate import run_pretranslate_step
 from src.papers.state import (
-    check_cancelled,
     load_paper,
     set_cancelled,
     set_error,
@@ -350,8 +349,9 @@ def process_paper(
         # Best-effort: failure → fallback unknown, never blocks pipeline.
         # Audit log: tenants/{tid}/_audit_classify/{paperId}_{ts}
         try:
-            from src.papers.classify import classify_paper_domain
             import time as _time
+
+            from src.papers.classify import classify_paper_domain
 
             classify_result = classify_paper_domain(ocr_result.full_text)
             now_ms = int(_time.time() * 1000)

@@ -30,8 +30,6 @@ Enriching DOI-less refs later (GROBID/Anystyle) would not need re-OCR.
 """
 from __future__ import annotations
 
-import re
-
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.papers.references_parser import (

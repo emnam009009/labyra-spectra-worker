@@ -142,7 +142,7 @@ def parse_convergence(text):
         r"^!\s+total energy\s+=\s+(-?[\d.]+)\s+Ry", text, re.M)]
     forces = [float(x) for x in re.findall(
         r"Total force\s+=\s+([\d.]+)\s+Total SCF correction", text)]
-    ionic = [{"energy_ry": e, "total_force": f} for e, f in zip(energies, forces)]
+    ionic = [{"energy_ry": e, "total_force": f} for e, f in zip(energies, forces, strict=True)]
 
     bfgs = re.search(r"bfgs converged in\s+(\d+) scf cycles and\s+(\d+) bfgs steps", text)
     converged = bool(bfgs) or ("convergence has been achieved" in text)
@@ -247,7 +247,7 @@ def to_qe_structure_block(struct):
     for row in struct["cell_ang"]:
         lines.append("  {:14.9f} {:14.9f} {:14.9f}".format(*row))
     lines.append("ATOMIC_POSITIONS (crystal)")
-    for sp, p in zip(struct["species"], struct["frac_positions"]):
+    for sp, p in zip(struct["species"], struct["frac_positions"], strict=True):
         lines.append("{:4s} {:14.9f} {:14.9f} {:14.9f}".format(sp, *p))
     return "\n".join(lines)
 
@@ -269,7 +269,7 @@ def band_gap_from_eigenvalues(bands_result, n_electrons, spin_polarized=False):
     vbm_k, cbm_k = kpts[vbm_i], kpts[cbm_i]
     direct = None
     if vbm_k is not None and cbm_k is not None:
-        direct = all(abs(a - b) < 1e-4 for a, b in zip(vbm_k, cbm_k))
+        direct = all(abs(a - b) < 1e-4 for a, b in zip(vbm_k, cbm_k, strict=True))
     return {
         "vbm_ev": round(vbm, 4), "cbm_ev": round(cbm, 4),
         "band_gap_ev": round(cbm - vbm, 4),

@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from src.csie.types import (
@@ -330,7 +330,6 @@ def run_csie(
         _compute_consistency(evidence, n_measurements)
 
     # Detect unexpected observations
-    declared_set = {c.get("formula") for c in declared_composition if c.get("formula")}
     unexpected: list[str] = []
     for measurement in measurements:
         analysis = measurement.get("analysisResult") or {}
@@ -365,7 +364,7 @@ def run_csie(
         conflicts_count=conflicts,
     )
 
-    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
     logger.info(
         "CSIE ok tenant=%s sample=%s measurements=%d coherence=%.2f conflicts=%d",

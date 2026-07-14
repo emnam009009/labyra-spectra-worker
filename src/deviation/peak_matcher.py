@@ -15,12 +15,11 @@ Algorithm:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
-
 
 # ── Tolerances per spectrum type ──────────────────────────────────────────────
 # Tuned to typical experimental + instrumental precision.
@@ -215,7 +214,7 @@ def match_peaks(
     matched_ref = set()
     deviations = []
 
-    for i, j in zip(row_ind, col_ind):
+    for i, j in zip(row_ind, col_ind, strict=True):
         d = cost[i, j]
         if d > tol:
             continue  # exceeds tolerance, leave both unmatched

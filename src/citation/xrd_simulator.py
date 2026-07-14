@@ -91,7 +91,7 @@ def simulate_powder_pattern(
 
         # Group by 2θ (round to 0.1°) → multiplicity-weighted sum
         bins: dict[float, dict[str, Any]] = {}
-        for t, i_val, h_vec in zip(tth, I, hkl_arr):
+        for t, i_val, h_vec in zip(tth, I, hkl_arr, strict=True):
             if i_val < I_max * 0.001:  # filter extremely weak
                 continue
             key = round(float(t) / PEAK_GROUP_TOLERANCE_DEG) * PEAK_GROUP_TOLERANCE_DEG

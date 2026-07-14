@@ -9,6 +9,7 @@ Pulls Sample composition + analyzed Measurements; writes single-doc CSIE result.
 from __future__ import annotations
 
 import logging
+from datetime import UTC
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -145,8 +146,9 @@ def check_rate_limit(tenant_id: str, max_per_hour: int = 50) -> bool:
     Schema: _rate_limits/{key} = { count, windowStartMs, expiresAt }
     Reuses pattern from R162 ADR-015.
     """
-    from src.firestore_client import _client
     import time
+
+    from src.firestore_client import _client
 
     db = _client()
     key = f"csie:{tenant_id}"
@@ -203,7 +205,6 @@ def should_skip_debounce(
     Returns True if CSIE was recently computed with same idempotency key
     within debounce window — skip recomputation.
     """
-    import time
     existing = fetch_existing_csie(tenant_id, sample_id)
     if not existing:
         return False
@@ -219,9 +220,9 @@ def should_skip_debounce(
 
     # Same key + recent → skip
     try:
-        from datetime import datetime, timezone
+        from datetime import datetime
         existing_dt = datetime.fromisoformat(existing_at.replace("Z", "+00:00"))
-        elapsed = (datetime.now(timezone.utc) - existing_dt).total_seconds()
+        elapsed = (datetime.now(UTC) - existing_dt).total_seconds()
         return elapsed < debounce_seconds
     except Exception:
         return False

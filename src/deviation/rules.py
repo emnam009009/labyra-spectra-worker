@@ -22,7 +22,6 @@ from typing import Any
 from src.deviation.hypothesis import Hypothesis, RuleCitation
 from src.deviation.peak_matcher import MatchResult, PeakMatch
 
-
 # ── Citations ─────────────────────────────────────────────────────────────────
 
 CIT_KHORSAND_STRAIN = RuleCitation(

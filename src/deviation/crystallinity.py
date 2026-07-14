@@ -16,9 +16,8 @@ References (verified DOIs):
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
-
 
 Classification = Literal["bulk", "nanocrystalline", "amorphous", "mixed", "unknown"]
 SizeMethod = Literal["scherrer", "phonon-confinement", "qualitative"]

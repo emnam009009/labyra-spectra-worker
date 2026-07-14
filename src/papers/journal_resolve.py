@@ -13,7 +13,6 @@ Pattern mirrors:
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
@@ -29,6 +28,7 @@ DEFAULT_TIMEOUT_SEC = 10.0
 
 # Polite mailto from env (set in deploy.sh secret CROSSREF_POLITE_MAILTO)
 import os
+
 POLITE_MAILTO = os.environ.get("CROSSREF_POLITE_MAILTO", "labyra-platform@github.io")
 USER_AGENT = f"Labyra-Worker/1.0 (mailto:{POLITE_MAILTO})"
 
@@ -143,7 +143,7 @@ def resolve_journal_from_doi(doi: str) -> JournalResolveResult:
     return result
 
 
-def _fetch_crossref(doi: str) -> Optional[dict]:
+def _fetch_crossref(doi: str) -> dict | None:
     """Returns parsed message or None."""
     url = f"{CROSSREF_API_BASE}/{doi}"
     try:
@@ -233,7 +233,7 @@ def _extract_issn(msg: dict) -> list[str]:
     return []
 
 
-def _fetch_openalex(doi: str) -> Optional[dict]:
+def _fetch_openalex(doi: str) -> dict | None:
     """Returns OpenAlex work JSON or None."""
     url = f"{OPENALEX_API_BASE}/{doi}"
     try:

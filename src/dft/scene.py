@@ -202,7 +202,7 @@ def analyze_structure(structure: dict[str, Any]) -> dict[str, Any]:
             sym_struct = sga.get_symmetrized_structure()
             wyckoff: list[dict[str, Any]] = []
             for eq_sites, wsym in zip(
-                sym_struct.equivalent_sites, sym_struct.wyckoff_symbols
+                sym_struct.equivalent_sites, sym_struct.wyckoff_symbols, strict=True
             ):
                 site = eq_sites[0]
                 wyckoff.append(

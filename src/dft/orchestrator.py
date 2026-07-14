@@ -19,8 +19,9 @@ from __future__ import annotations
 
 import math
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from src.dft.qe_parser import BOHR_TO_ANG, parse_final_structure
 
@@ -219,7 +220,7 @@ def relaxed_structure_from_out(
         "atomicSpecies": base_structure.get("atomicSpecies", []),
         "atomicPositions": [
             {"element": sp, "x": p[0], "y": p[1], "z": p[2]}
-            for sp, p in zip(fs["species"], fs["frac_positions"])
+            for sp, p in zip(fs["species"], fs["frac_positions"], strict=True)
         ],
         "positionsType": "crystal",
     }

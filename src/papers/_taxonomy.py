@@ -25,7 +25,6 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
 TAXONOMY_VERSION = "v1"
 PROMPT_VERSION = "v1.1"
 

@@ -17,16 +17,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, status, Header
+from fastapi import APIRouter, Header, HTTPException, Request, status
+from pydantic import BaseModel as _BaseModel
 
 from src.config import get_settings
 from src.dft import structure as dft_structure
-from src.dft.generator import generate_postproc_input, generate_pw_input
-from src.dft.scene import analyze_structure, brillouin_zone, build_scene, export_structure
-from pydantic import BaseModel as _BaseModel
 from src.dft.batch_client import get_job_labels
 from src.dft.driver import advance
 from src.dft.errors import FatalError
+from src.dft.generator import generate_postproc_input, generate_pw_input
+from src.dft.scene import analyze_structure, brillouin_zone, build_scene, export_structure
 from src.dft.schema import (
     GenerateRequest,
     GenerateResponse,
@@ -905,7 +905,6 @@ async def results_summary(request: Request) -> dict[str, Any]:
             pass
 
     # dos: DOS at Fermi
-    energies = None
     dos_u = by_calc.get("dos")
     if dos_u:
         try:
@@ -913,7 +912,6 @@ async def results_summary(request: Request) -> dict[str, Any]:
             dos_files = [n for n in names if n.endswith(".dos")]
             if dos_files:
                 d = parse_dos(io.read_text(dos_files[0]))
-                energies = d.get("energies_ev")
                 res["dos"] = {
                     "fermiEv": d.get("fermi_ev"),
                     "dosAtFermi": d.get("dos_at_fermi"),

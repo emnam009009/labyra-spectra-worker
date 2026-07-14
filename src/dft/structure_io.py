@@ -9,8 +9,9 @@ TRIẾT LÝ TIN CẬY TUYỆT ĐỐI: không TRUST map ibrav, mà VERIFY.
   4. Sanity checks (volume, composition, atom chồng) → vô lý thì RAISE, không nuốt.
 """
 import math
+
 import numpy as np
-from pymatgen.core import Structure, Lattice
+from pymatgen.core import Lattice, Structure
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
 BOHR = 0.529177210903

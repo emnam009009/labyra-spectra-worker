@@ -91,8 +91,9 @@ def irreducible_kpoints(structure: dict[str, Any], kpoints: dict[str, Any], nspi
             shift = kpoints.get("shift") or [0, 0, 0]
             if not grid or len(grid) != 3:
                 return None
-            from src.dft.scene import _reconstruct
             from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+
+            from src.dft.scene import _reconstruct
 
             struct = _reconstruct(structure)
             sga = SpacegroupAnalyzer(struct, symprec=1e-3)

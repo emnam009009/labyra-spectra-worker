@@ -17,7 +17,7 @@ for which polymorph to fetch).
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -107,7 +107,7 @@ def _doc_to_profile(best: Any) -> dict[str, Any]:
             "volume": round(volume, 3) if volume is not None else None,
             "density": round(density, 4) if density is not None else None,
             "theoretical": theoretical,
-            "syncedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "syncedAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         },
     }
     # NOTE: crystal structure is intentionally NOT synced from MP — safe_patch

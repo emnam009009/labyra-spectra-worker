@@ -16,12 +16,10 @@ does NOT raise to caller (so spectrum pipeline keeps working).
 """
 from __future__ import annotations
 
-import hashlib
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from src.csie.ambiguity import handle_ambiguous
 from src.csie.aggregator import (
     MAX_MEASUREMENTS_PER_RUN,
     MIN_MEASUREMENTS,
@@ -29,6 +27,7 @@ from src.csie.aggregator import (
     _hash_for_logs,
     run_csie,
 )
+from src.csie.ambiguity import handle_ambiguous
 from src.csie.firestore_io import (
     check_rate_limit,
     fetch_analyzed_measurements,
@@ -109,7 +108,7 @@ def run_csie_for_sample(
             status="ok",
             notes=["Same input as last run within 5 min; result reused"],
             idempotency_key=idem_key,
-            computed_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            computed_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         )
 
     # Run aggregator

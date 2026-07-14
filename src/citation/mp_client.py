@@ -48,7 +48,6 @@ def search_mp_by_formula(formula: str, *, max_results: int = MP_MAX_RESULTS) -> 
     ])
     # Capitalize formula using periodic table element matching
     # MP API strict: WO3 not wo3, Fe2O3 not fe2o3
-    import re
     ELEMENTS = {
         'H','He','Li','Be','B','C','N','O','F','Ne','Na','Mg','Al','Si','P','S','Cl','Ar',
         'K','Ca','Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn','Ga','Ge','As','Se','Br','Kr',

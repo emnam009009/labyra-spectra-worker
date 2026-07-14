@@ -21,14 +21,14 @@ Self-implemented per Option A (R185 license audit). Algorithm inspired by:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
-from typing import Any, Literal
+from dataclasses import asdict, dataclass, field
+from typing import Any
 
 from src.deviation.peak_matcher import (
     DEFAULT_TOLERANCES,
+    MatchResult,
     SpectrumType,
     match_peaks,
-    MatchResult,
 )
 
 # Weight priors per role — used to order phases in greedy matching.
@@ -227,7 +227,7 @@ def match_multi_phase(
         matched_pool_indices = {m.sample_index for m in single_result.matches}
         new_pool = []
         new_indices = []
-        for i, (peak, orig_idx) in enumerate(zip(working_pool, pool_original_indices)):
+        for i, (peak, orig_idx) in enumerate(zip(working_pool, pool_original_indices, strict=True)):
             if i not in matched_pool_indices:
                 new_pool.append(peak)
                 new_indices.append(orig_idx)
@@ -235,7 +235,7 @@ def match_multi_phase(
         pool_original_indices = new_indices
 
     # Remaining peaks = unassigned
-    for peak, orig_idx in zip(working_pool, pool_original_indices):
+    for peak, orig_idx in zip(working_pool, pool_original_indices, strict=True):
         pos = _get_position(peak, spectrum_type)
         if pos is None:
             continue

@@ -13,11 +13,11 @@ of truth cross-process.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
-from datetime import datetime
 from google.cloud import firestore  # type: ignore[import-untyped]
-from google.cloud.firestore_v1 import Increment, SERVER_TIMESTAMP  # type: ignore[import-untyped]
+from google.cloud.firestore_v1 import SERVER_TIMESTAMP, Increment  # type: ignore[import-untyped]
 
 from src.papers.errors import CancelledError, FatalError
 from src.papers.types import PaperDoc, PaperStatus

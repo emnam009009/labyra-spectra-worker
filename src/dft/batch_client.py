@@ -215,7 +215,6 @@ def get_job_state(job_name: str, client: Any | None = None) -> str:
 def get_job_labels(job_name: str, client: Any | None = None) -> dict[str, str]:
     """Read a Batch job's labels (the /dft/advance handler maps JobName →
     {dft_tenant, dft_workflow, dft_unit}, since the notification carries only JobName)."""
-    from google.cloud import batch_v1
 
     client = client or _client()
     job = client.get_job(name=job_name)

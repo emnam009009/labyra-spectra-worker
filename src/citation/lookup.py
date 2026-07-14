@@ -27,8 +27,7 @@ from src.citation.mp_client import (
     search_mp_by_formula,
 )
 from src.citation.peak_matcher import match_peaks
-from src.citation.cache import get_cache
-from src.citation.types import Candidate, Citation
+from src.citation.types import Candidate
 from src.citation.xrd_simulator import simulate_powder_pattern
 
 logger = logging.getLogger(__name__)

@@ -13,15 +13,16 @@ Returns dict ready to merge into analysisResult.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
+from src.deviation.composite_rules import run_composite_rules
+from src.deviation.crystallinity import adaptive_tolerance, classify_crystallinity
+from src.deviation.fraction_estimator import estimate_fractions
 from src.deviation.multi_phase import (
     ComponentDeclaration,
     match_multi_phase,
 )
-from src.deviation.composite_rules import run_composite_rules
-from src.deviation.fraction_estimator import estimate_fractions
-from src.deviation.crystallinity import classify_crystallinity, adaptive_tolerance
 from src.deviation.peak_matcher import (
     DEFAULT_TOLERANCES,
     SpectrumType,
@@ -106,7 +107,9 @@ def run_deviation_analysis(
             for cm in multi_result.components:
                 # Reconstruct MatchResult from cm.match_result dict for run_rules
                 from src.deviation.peak_matcher import (
-                    MatchResult, PeakMatch, UnmatchedPeak,
+                    MatchResult,
+                    PeakMatch,
+                    UnmatchedPeak,
                 )
                 mr_dict = cm.match_result
                 # Rebuild MatchResult (dataclass) from dict

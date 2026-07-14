@@ -10,8 +10,8 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request, status
 
 from src.ai.analyzer import analyze as ai_analyze
-from src.deviation.pipeline import run_deviation_analysis
 from src.config import get_settings
+from src.deviation.pipeline import run_deviation_analysis
 from src.firestore_client import (
     STATUS_ANALYZED,
     STATUS_FAILED,
@@ -101,8 +101,6 @@ async def handle_pubsub_push(request: Request) -> None:
 
 def _process(tenant_id: str, spectrum_id: str) -> None:
     """Core pipeline. Raises on error; caller writes failed status + acks."""
-    settings = get_settings()
-
     # 1. Load metadata
     metadata = get_spectrum(tenant_id, spectrum_id)
     if not metadata:
@@ -156,7 +154,7 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
     # XRD: use citation-enabled parser (lookup COD + MP candidates)
     # Also support .xlsx via bytes-aware wrapper
     if spectrum_type == "xrd":
-        from src.parsers.xrd import parse_xrd_with_citation, parse_xrd_bytes
+        from src.parsers.xrd import parse_xrd_bytes, parse_xrd_with_citation
         original_filename = metadata.get("originalFilename", "")
         if original_filename.lower().endswith(".xlsx"):
             def parser(raw_bytes_or_text):
@@ -353,6 +351,7 @@ def _process(tenant_id: str, spectrum_id: str) -> None:
 # R160-spectra-4a-pdf: Reference card parser endpoint
 # ============================================================
 from pydantic import BaseModel
+
 from src.reference.parser import parse_reference_card
 
 
@@ -456,9 +455,11 @@ async def handle_papers_push(request: Request) -> None:
     #   - FatalError        → 400 (permanent failure, ack — no retry)
     #   - RetryableError +  → 500 (transient, Pub/Sub retries → DLQ after 5)
     #     any other Exception
-    from src.papers.orchestrator import process_paper
-    from src.papers.errors import CancelledError as _CancelledError, FatalError as _FatalError
     from google.cloud import firestore as _firestore
+
+    from src.papers.errors import CancelledError as _CancelledError
+    from src.papers.errors import FatalError as _FatalError
+    from src.papers.orchestrator import process_paper
 
     created_by = payload.get("createdBy", "")
     db = _firestore.Client(project=get_settings().gcp_project_id)
@@ -504,8 +505,8 @@ async def parse_reference(req: ParseReferenceCardRequest) -> dict:
 # R184: Materials Project sync endpoint
 # ============================================================================
 
+
 from pydantic import BaseModel as _BaseModel
-from typing import Optional as _Optional
 
 
 class MaterialSyncRequest(_BaseModel):
@@ -514,7 +515,7 @@ class MaterialSyncRequest(_BaseModel):
 
 class MaterialSearchRequest(_BaseModel):
     query: str
-    limit: _Optional[int] = 30
+    limit: int | None = 30
 
 
 class MpSummaryRequest(_BaseModel):
@@ -533,8 +534,9 @@ async def sync_materials(req: MaterialSyncRequest, request: Request) -> dict:
     POST /materials/sync
     Body: {"formulas": ["MoS2", "WO3"]}  // omit for full DEFAULT_FORMULAS batch
     """
-    from src.materials.mp_sync import sync_batch, DEFAULT_FORMULAS
     from google.cloud import firestore as _fs
+
+    from src.materials.mp_sync import DEFAULT_FORMULAS, sync_batch
 
     settings = get_settings()
     if not settings.mp_api_key:
@@ -649,9 +651,10 @@ async def csie_process(request: Request) -> dict:
     Subscriber URL: receives push from csie-trigger topic with body
     { tenantId, sampleId } (base64 wrapped in Pub/Sub envelope).
     """
-    from src.csie.pipeline import run_csie_for_sample
     import base64
     import json
+
+    from src.csie.pipeline import run_csie_for_sample
 
     try:
         envelope = await request.json()

@@ -24,7 +24,6 @@ from typing import Any
 from src.deviation.hypothesis import Hypothesis, RuleCitation
 from src.deviation.multi_phase import ComponentMatch, MultiPhaseResult
 
-
 # ── Citations ─────────────────────────────────────────────────────────────────
 
 CIT_CHEN_CHARGE_TRANSFER = RuleCitation(
@@ -128,7 +127,7 @@ def rule_charge_transfer_tmd_graphene(
     evidence = [
         f"TMD A1g downshifted by {a1g_dev:.1f} cm-1 (electron accumulation)",
         f"Carbon G-band upshifted by +{g_dev:.1f} cm-1 (electron donation)",
-        f"Charge transfer signature consistent across both phases",
+        "Charge transfer signature consistent across both phases",
     ]
 
     confidence = min(0.85, 0.6 + min(abs(a1g_dev), 5) * 0.05 + min(g_dev, 5) * 0.03)
@@ -139,8 +138,8 @@ def rule_charge_transfer_tmd_graphene(
         confidence=round(confidence, 2),
         evidence=evidence,
         quantitative_estimate=(
-            f"Electron transfer ~ 10^12-10^13 cm-2 (order of magnitude). "
-            f"Confirm via XPS binding energy shifts."
+            "Electron transfer ~ 10^12-10^13 cm-2 (order of magnitude). "
+            "Confirm via XPS binding energy shifts."
         ),
         suggested_followup=(
             "XPS: shift in TMD core level (e.g. Mo 3d, W 4f) toward lower BE. "

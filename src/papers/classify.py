@@ -21,20 +21,20 @@ from __future__ import annotations
 
 import logging
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from src.config import get_settings
 from src.papers._gemini_client import extract_json
 from src.papers._taxonomy import (
     APPLICATION_SLUGS,
     CHARACTERIZATION_SLUGS,
-    DomainClassification,
-    DomainConfidence,
     MATERIALS_CLASS_SLUGS,
     META_SLUGS,
     PROMPT_VERSION,
     SYNTHESIS_SLUGS,
     TAXONOMY_VERSION,
+    DomainClassification,
+    DomainConfidence,
 )
 
 logger = logging.getLogger(__name__)

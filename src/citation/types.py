@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Literal
 
-
 SourceType = Literal["COD", "MP", "internal", "web", "unverified"]
 
 

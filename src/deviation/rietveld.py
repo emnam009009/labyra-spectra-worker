@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import numpy as np
@@ -152,7 +152,7 @@ def simulate_phase_pattern_with_profile(
     Pseudo-Voigt of FWHM = Caglioti(2θ_k - zero_shift).
     """
     y = np.zeros_like(x_grid, dtype=float)
-    for x_k, i_k in zip(bragg_x, bragg_intensity):
+    for x_k, i_k in zip(bragg_x, bragg_intensity, strict=True):
         if i_k <= 0:
             continue
         shifted_center = x_k + zero_shift
@@ -453,7 +453,7 @@ def refine_full(
                 # Sum of model intensity in narrow windows around each Bragg peak
                 window = 0.3  # 2theta degrees
                 ratios_num, ratios_den = 0.0, 0.0
-                for bx, bi in zip(bragg_x, bragg_i):
+                for bx, _bi in zip(bragg_x, bragg_i, strict=True):
                     mask = (observed_x >= bx - window) & (observed_x <= bx + window)
                     if not mask.any():
                         continue
@@ -729,7 +729,7 @@ def simulate_phase_pattern(structure_dict, formula, two_theta_range, wavelength_
     x = np.linspace(two_theta_range[0], two_theta_range[1], n_points)
     sigma = fwhm_deg / (2 * math.sqrt(2 * math.log(2)))
     y = np.zeros_like(x)
-    for c, i in zip(bragg_x, bragg_i):
+    for c, i in zip(bragg_x, bragg_i, strict=True):
         if i <= 0:
             continue
         y += i * np.exp(-((x - c) ** 2) / (2 * sigma ** 2))

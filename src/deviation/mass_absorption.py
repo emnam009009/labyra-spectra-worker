@@ -17,7 +17,6 @@ For Cu Kalpha (8.04 keV, 1.5406 A), typical MAC values (cm^2/g):
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
