@@ -31,8 +31,11 @@ logger = logging.getLogger(__name__)
 
 # Strategy §2.4 — pattern + cost don't fit these document types.
 _EXCLUDED_TYPES = {"book", "thesis", "dissertation", "monograph", "presentation"}
-_MAX_PAGES = 50
-_MAX_CHARS = 200_000
+# R549: a ceiling on the text actually sent to the model. Abstract + conclusion
+# + headings run ~2-6k characters for a normal paper; 40k is far above anything
+# real and still catches an OCR mishap that hands us a whole paper as one
+# "abstract" heading.
+_MAX_PAYLOAD_CHARS = 40_000
 
 _ABSTRACT_NAMES = ("abstract", "summary")
 _CONCLUSION_NAMES = (
@@ -67,13 +70,25 @@ class PretranslateSections(NamedTuple):
     headings: list[str]
 
 
-def should_pretranslate(document_type: str, num_pages: int, total_chars: int) -> bool:
-    """Article-type + size-bounded only (strategy §2.4)."""
+def should_pretranslate(document_type: str, payload_chars: int) -> bool:
+    """Eligible if the type is right and the *payload* is bounded.
+
+    R549: the size test now measures what gets translated, not how thick the
+    paper is.
+
+    It used to gate on ``num_pages > 50`` and ``len(full_text) > 200_000``,
+    before extracting anything — but the payload is the abstract, the conclusion
+    and the headings. An abstract sits on page one and runs a few hundred words
+    whether the paper is six pages or a hundred and twenty. So the gate measured
+    a quantity it was not protecting, and the papers it turned away were reviews
+    — the ones whose abstract is worth the most to someone new to the topic.
+
+    The type exclusion stays: a book or a deck has no single abstract to lift,
+    and extract_sections finds nothing in them anyway.
+    """
     if (document_type or "").strip().lower() in _EXCLUDED_TYPES:
         return False
-    if num_pages > _MAX_PAGES:
-        return False
-    return total_chars <= _MAX_CHARS
+    return payload_chars <= _MAX_PAYLOAD_CHARS
 
 
 def _find_section(sections: dict[str, list[str]], names: tuple[str, ...]) -> str:
@@ -169,8 +184,9 @@ def run_pretranslate_step(
     Best-effort + non-fatal. Skipped when the paper is ineligible or already in
     the target language (en->en).
     """
-    if not should_pretranslate(document_type, ocr_result.page_count, len(ocr_result.full_text)):
-        logger.info("pretranslate_skip_ineligible paper=%s type=%s", paper_id, document_type)
+    # Type first: it costs nothing to check and rules out whole categories.
+    if (document_type or "").strip().lower() in _EXCLUDED_TYPES:
+        logger.info("pretranslate_skip_type paper=%s type=%s", paper_id, document_type)
         return
 
     target = _tenant_default_language(db, tenant_id)
@@ -179,10 +195,26 @@ def run_pretranslate_step(
         return
 
     target_name = _LANG_NAME.get(target, "English")
+    # R549: extract *before* the size test, so the test can weigh the thing it is
+    # actually paying for. Extraction is local string work over OCR output we
+    # already have — it costs nothing to do first, and doing it second is what
+    # let a page count veto an abstract sitting on page one.
     sections = extract_sections(ocr_result)
     # Prefer the metadata-extracted abstract (reliable even when there's no
     # "Abstract" heading, e.g. review articles); fall back to section extraction.
     abstract_src = (abstract or "").strip() or sections.abstract
+
+    payload_chars = len(abstract_src) + len(sections.conclusion) + sum(
+        len(h) for h in sections.headings
+    )
+    if not should_pretranslate(document_type, payload_chars):
+        logger.info(
+            "pretranslate_skip_payload paper=%s chars=%d limit=%d",
+            paper_id,
+            payload_chars,
+            _MAX_PAYLOAD_CHARS,
+        )
+        return
     if not abstract_src and not sections.conclusion and not sections.headings:
         logger.info("pretranslate_skip_no_sections paper=%s", paper_id)
         return
