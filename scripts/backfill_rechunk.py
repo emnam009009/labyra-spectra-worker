@@ -49,23 +49,30 @@ class Damage:
         return max(self.bad_start, self.bad_end)
 
 
+def _words(text: str) -> set[str]:
+    """Standalone words, punctuation stripped."""
+    return {"".join(c for c in w if c.isalnum()).lower() for w in text.split()}
+
+
 def _fragment_at_start(text: str, previous: str) -> bool:
-    """True when this chunk opens on the tail of a word that the previous chunk
-    holds whole.
+    """True when this chunk opens on the tail of a word the previous chunk holds
+    whole.
 
-    There is no text-only way to know that "culations" is a fragment — it looks
-    like a word, and no dictionary here would settle it. But the chunks overlap:
-    the window steps back OVERLAP_CHARS, so whatever this chunk opens with also
-    appears near the end of the one before. If the previous chunk contains a
-    longer word *ending* in this chunk's first token, then this token is that
-    word's tail and the boundary split it.
+    R562: ask whether the token is a real word *first*.
 
-    "…improved cal" / "culations involving" → previous ends "cal", this starts
-    "culations"; no. The other way round: previous holds "calculations" whole and
-    this opens "culations" → fragment, proven, no guessing.
+    The first version asked only "does the previous chunk contain a longer word
+    ending in this token" — and in scientific English that fires constantly on
+    perfectly good words. "ions" opens a chunk and "reactions" ends with it;
+    "used"/"unused", "able"/"favorable", "rate"/"moderate". Four of six
+    adversarial cases wrong. It reported 26% damage across the library and the
+    figure did not move after a backfill that worked, because false positives do
+    not get fixed by re-chunking. I measured with a broken ruler and asked for
+    money on the reading.
 
-    Four characters minimum: shorter tails coincide with real words too often
-    ("the" ends "breathe") and the finding has to be worth acting on.
+    The overlap answers it properly. If this chunk opens at a word boundary, the
+    same word sits in the previous chunk *as a word*. If it opens on a fragment,
+    the previous chunk holds the whole word and the fragment appears nowhere on
+    its own. So: standalone first, suffix second.
     """
     if not text or not previous:
         return False
@@ -76,18 +83,16 @@ def _fragment_at_start(text: str, previous: str) -> bool:
         head += ch
     if len(head) < 4:
         return False
-    # A whole word in the previous chunk that ends with `head` and is longer.
-    for word in previous.split():
-        w = "".join(c for c in word if c.isalnum())
-        if len(w) > len(head) and w.endswith(head):
-            return True
-    return False
+    prev_words = _words(previous)
+    # A real word — the overlap proves it, no suffix test needed.
+    if head.lower() in prev_words:
+        return False
+    return any(len(w) > len(head) and w.endswith(head.lower()) for w in prev_words)
 
 
 def _fragment_at_end(text: str, following: str) -> bool:
     """True when this chunk closes on the head of a word the next chunk holds
-    whole. The mirror of the test above, and it has to be tested separately:
-    R556 snapped both edges because both were broken."""
+    whole. Same correction as above: a real word is proved by the overlap."""
     if not text or not following:
         return False
     tail = ""
@@ -97,11 +102,10 @@ def _fragment_at_end(text: str, following: str) -> bool:
         tail = ch + tail
     if len(tail) < 4:
         return False
-    for word in following.split():
-        w = "".join(c for c in word if c.isalnum())
-        if len(w) > len(tail) and w.startswith(tail):
-            return True
-    return False
+    next_words = _words(following)
+    if tail.lower() in next_words:
+        return False
+    return any(len(w) > len(tail) and w.startswith(tail.lower()) for w in next_words)
 
 
 def scan(db: firestore.Client, tenant_id: str) -> list[Damage]:
