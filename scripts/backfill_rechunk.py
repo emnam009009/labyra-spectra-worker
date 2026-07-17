@@ -188,6 +188,12 @@ def main() -> int:
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--dry-run", action="store_true", help="Đếm, không sửa gì")
     g.add_argument("--apply", action="store_true", help="Chunk lại + embed lại")
+    ap.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Chỉ chạy N paper đầu — chạy thử trước khi chạy cả thư viện",
+    )
     args = ap.parse_args()
 
     db = firestore.Client()
@@ -201,13 +207,100 @@ def main() -> int:
         print("Không có gì để chạy lại.")
         return 0
 
-    # --apply deliberately stops here for now. Re-chunking means deleting the
-    # chunk subcollection, re-running the pipeline from the OCR cache, and
-    # re-upserting Pinecone under the same vector ids — a destructive write
-    # across two stores. It should not be one flag away from a script whose
-    # dry-run has never been read against real data.
-    print("--apply chưa nối. Chạy --dry-run trước và đưa tôi con số.")
-    return 1
+    targets = [r for r in rows if r.bad > 0]
+    if args.limit:
+        targets = targets[: args.limit]
+    print(f"\n--apply: {len(targets)} paper\n")
+
+    ok = 0
+    for i, r in enumerate(targets, 1):
+        try:
+            n_old, n_new = rechunk_one(db, args.tenant, r.paper_id)
+            orphan = max(0, n_old - n_new)
+            note = f" · {orphan} chunk mồ côi đã xoá" if orphan else ""
+            print(f"  [{i}/{len(targets)}] {r.title:<44} {n_old} → {n_new}{note}")
+            ok += 1
+        except Exception as exc:  # noqa: BLE001 — one bad paper must not stop the run
+            print(f"  [{i}/{len(targets)}] {r.title:<44} LỖI: {exc}")
+
+    print(f"\n{ok}/{len(targets)} paper xong.")
+    return 0 if ok == len(targets) else 1
+
+
+def rechunk_one(db: firestore.Client, tenant_id: str, paper_id: str) -> tuple[int, int]:
+    """Re-chunk one paper from cached OCR. Returns (old count, new count).
+
+    Order matters, and it is not the obvious one.
+
+    The obvious order is: delete the old chunks, write the new ones. That leaves
+    the paper unsearchable in the gap, and if the process dies in that gap it
+    leaves it unsearchable for good. So: write first, then remove only what the
+    new pass did not overwrite.
+
+    That remainder is the whole hazard here. Chunk ids are `{paper_id}-{idx}`,
+    and snapping to word boundaries shortens windows slightly — a paper that was
+    19 chunks may come back 15. Upserting overwrites 0..14 and leaves 15..18
+    sitting in Firestore *and Pinecone*, still retrievable, still answering
+    questions from text that no longer exists in any chunk. Stale chunks are not
+    harmless leftovers; they are ghosts with a vote.
+    """
+    # Real names, checked against the modules rather than remembered. I had
+    # written `embed_chunks` and `load_cached_ocr`; neither exists.
+    from src.papers.chunking import chunk_paper
+    from src.papers.embed import run_embed_step
+    from src.papers.index import run_index_step
+    from src.papers.ocr import run_ocr_step
+    from src.papers.types import PaperDoc
+
+    paper_ref = db.document(f"tenants/{tenant_id}/papers/{paper_id}")
+    snap = paper_ref.get()
+    if not snap.exists:
+        raise RuntimeError("paper không tồn tại")
+    # PaperDoc is a Pydantic model, not a dict — run_index_step would have
+    # thrown on a raw dict at the first attribute access. extra='ignore' means
+    # the app's PROV-O fields pass through harmlessly.
+    raw = snap.to_dict() or {}
+    paper = PaperDoc(**raw)
+
+    chunks_col = db.collection(f"tenants/{tenant_id}/papers/{paper_id}/chunks")
+    old_ids = {c.id for c in chunks_col.stream()}
+
+    storage_path = raw.get("storagePath") or ""
+    if not storage_path:
+        raise RuntimeError("paper không có storagePath")
+
+    # run_ocr_step checks the SHA256 cache itself (R181) and returns the cached
+    # result on a hit. Going through it rather than reaching for the cache
+    # directly means this script cannot drift from what ingest actually does —
+    # the same reason it calls chunk_paper and run_index_step instead of
+    # reimplementing them.
+    ocr = run_ocr_step(db, tenant_id, paper_id, storage_path)
+
+    fresh = chunk_paper(ocr)
+    if not fresh:
+        raise RuntimeError("chunk lại ra 0 chunk")
+
+    embedded = run_embed_step(db, tenant_id, paper_id, fresh)
+    run_index_step(db, tenant_id, paper, embedded)
+
+    new_ids = {f"{paper_id}-{c.chunk_idx}" for c in fresh}
+    orphans = old_ids - new_ids
+    if orphans:
+        batch = db.batch()
+        for oid in orphans:
+            batch.delete(chunks_col.document(oid))
+        batch.commit()
+        _pinecone_delete(list(orphans))
+
+    return len(old_ids), len(new_ids)
+
+
+def _pinecone_delete(ids: list[str]) -> None:
+    """Drop orphaned vectors. Firestore and Pinecone must agree on what exists —
+    a chunk deleted from one and left in the other is worse than either."""
+    from src.papers.index import _pinecone_index
+
+    _pinecone_index().delete(ids=ids)
 
 
 if __name__ == "__main__":
