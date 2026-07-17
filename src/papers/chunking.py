@@ -87,6 +87,43 @@ def chunk_paper(ocr_result: OcrResult) -> list[Chunk]:
     if not char_stream:
         return []
 
+    # R556: snap both window edges to word boundaries.
+    #
+    # The window is counted in characters, so `char_stream[start:end]` and
+    # `start = end - OVERLAP_CHARS` land wherever the count runs out — which in
+    # English prose is inside a word about five times in six. That is how a chunk
+    # comes to begin "l bandgap energy…" when the paper says "optical bandgap
+    # energy": the "optica" is not trimmed downstream, it was never written.
+    # Every citation drawn from such a chunk shows the damage.
+    #
+    # Bounded at 40 characters: past that we are not near a boundary, and a run
+    # that long without whitespace is a formula or a URL, where the exact cut
+    # matters less than not walking half a chunk hunting for a space.
+    SNAP_LIMIT = 40
+
+    def _is_word(i: int) -> bool:
+        return 0 <= i < total and char_stream[i][0].isalnum()
+
+    def _snap_forward(i: int) -> int:
+        """Advance to the start of the next whole word."""
+        if not _is_word(i) or not _is_word(i - 1):
+            return i
+        j = i
+        while j < total and j - i < SNAP_LIMIT and _is_word(j):
+            j += 1
+        while j < total and j - i < SNAP_LIMIT and not _is_word(j):
+            j += 1
+        return i if j - i >= SNAP_LIMIT else j
+
+    def _snap_back(i: int) -> int:
+        """Retreat to the end of the last whole word."""
+        if not _is_word(i - 1) or not _is_word(i):
+            return i
+        j = i
+        while j > 0 and i - j < SNAP_LIMIT and _is_word(j - 1):
+            j -= 1
+        return i if i - j >= SNAP_LIMIT else j
+
     # Sliding window
     chunks: list[Chunk] = []
     start = 0
@@ -94,7 +131,17 @@ def chunk_paper(ocr_result: OcrResult) -> list[Chunk]:
     total = len(char_stream)
 
     while start < total:
-        end = min(start + TARGET_CHARS, total)
+        raw_end = min(start + TARGET_CHARS, total)
+        end = raw_end if raw_end >= total else _snap_back(raw_end)
+        # Snapping must never eat the window. A 120-character formula with no
+        # whitespace makes _snap_back walk all the way to `start`, the window
+        # becomes empty, `start` never advances and the loop spins forever. The
+        # SNAP_LIMIT check inside the helper does not catch it — it measures
+        # distance, and the distance here is under the limit. Guaranteeing
+        # progress belongs where progress is decided, not where the boundary is
+        # guessed.
+        if end <= start:
+            end = raw_end
         window = char_stream[start:end]
         text = "".join(c[0] for c in window).strip()
 
@@ -124,6 +171,12 @@ def chunk_paper(ocr_result: OcrResult) -> list[Chunk]:
 
         if end >= total:
             break
-        start = end - OVERLAP_CHARS
+        # Snap the next start too, or the overlap re-introduces the split the
+        # end just avoided — it is the same arithmetic on the same counter.
+        # And never stand still: if snapping cannot get past this window's
+        # start, take the raw index. A chunker that loops forever on a 40-char
+        # formula is a worse bug than a split word.
+        next_start = _snap_forward(max(0, end - OVERLAP_CHARS))
+        start = next_start if next_start > start else end
 
     return chunks
